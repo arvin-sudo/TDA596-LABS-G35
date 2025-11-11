@@ -3,8 +3,9 @@ package main
 import (
 	//"bufio"		// buffered reading
 	//"bytes"		// create reader from buffer
-	"fmt" // print to console
-	"net" // tcp listener
+	"fmt"     // print to console
+	"net"     // tcp listener
+	"strconv" // string to int conversion
 
 	//"net/http"	// parse http request
 	"os"            // OS system functions
@@ -48,8 +49,21 @@ func isValidExtension(filename string) bool {
 }
 
 func main() {
-	// TODO: implement port from command line arguments later
-	port := "8080"
+	// PORT SETUP AND VALIDATION
+	// check and get port from command line arguments
+	if len(os.Args) < 2 {
+		fmt.Println("Usage: ./http-server <port>")
+		os.Exit(1)
+	}
+
+	// set port from command line argument
+	port = os.Args[1]
+
+	// validate port number
+	if _, err := strconv.Atoi(port); err != nil {
+		fmt.Println("Invalid port number:", port)
+		os.Exit(1)
+	}
 
 	// create a TCP listener on port 8080
 	listener, err := net.Listen("tcp", ":"+port)
