@@ -6,17 +6,29 @@ import (
 	"io"
 	"net"
 	"os"
-	"path/filepath"
 	_ "path/filepath"
 	"strconv"
 	"strings"
+)
+
+type ErrorResponse struct {
+	Message string
+	Code    int
+	flag    bool
+}
+
+var (
+	inValidFileExt   = ErrorResponse{"INVALID_FILE_EXTENSION", 400, false}
+	methodNotAllowed = ErrorResponse{"METHOD_NOT_ALLOWED", 501, false}
+	notError         = ErrorResponse{"NOT_ERROR", 0, true}
+	fileNotFound     = ErrorResponse{"FILE_NOT_FOUND", 404, false}
 )
 
 func main() {
 	// listen for incoming tcp connections
 	listener, err := net.Listen("tcp", ":8080")
 	if err != nil {
-		panic("Error listening: " + err.Error())
+		fmt.Println("Error listening: " + err.Error())
 		return
 	}
 
@@ -62,52 +74,26 @@ func handleConnection(conn net.Conn) {
 			continue
 		}
 
-		if checkRequestType(requestMessage) {
+		if strings.HasPrefix(requestMessage, "GET") {
+			// send file
+			fileName := strings.TrimPrefix(requestMessage, "GET") // trim out fileName
+			fileName = strings.TrimSpace(fileName)
 
-			if strings.HasPrefix(requestMessage, "GET") {
-				// send file
-				fileName := strings.TrimPrefix(requestMessage, "GET") // trim out fileName
-				fileName = strings.TrimSpace(fileName)
+			sendFile(fileName, conn)
 
-				// check hasValidExtension
+		} else if strings.HasPrefix(requestMessage, "POST") {
+			// download file
+			// POST filename.ext fileSize
+			content := strings.TrimPrefix(requestMessage, "POST") // trim out fileName
 
-				if hasValidExtension(fileName) {
-					sendFile(fileName, conn)
-				} else {
-					fmt.Println("Invalid file extension")
-					_, err := conn.Write([]byte("ERR inValid file extension\n"))
-					if err != nil {
-						return
-					}
-				}
+			fields := strings.Fields(content)
+			fileName := fields[0]
+			fileSize, _ := strconv.Atoi(fields[1])
 
-			} else if strings.HasPrefix(requestMessage, "POST") {
-				// download file
-				// POST filename.ext fileSize
-				content := strings.TrimPrefix(requestMessage, "POST") // trim out fileName
+			downloadFile(fileName, conn, fileSize, reader)
 
-				fields := strings.Fields(content)
-				fileName := fields[0]
-				fileSize, _ := strconv.Atoi(fields[1])
-
-				if hasValidExtension(fileName) {
-					downloadFile(fileName, conn, fileSize, reader)
-				} else {
-					fmt.Println("Invalid file extension.")
-					_, err := conn.Write([]byte("ERR inValid file extension\n"))
-					if err != nil {
-						return
-					}
-				}
-
-			} else {
-				_, err := conn.Write([]byte("ERR Unknown command\n"))
-				if err != nil {
-					return
-				}
-			}
 		} else {
-			_, err := conn.Write([]byte("ERR (501) Method not Implemented\n"))
+			_, err := conn.Write([]byte("ERR Unknown command\n"))
 			if err != nil {
 				return
 			}
@@ -116,42 +102,18 @@ func handleConnection(conn net.Conn) {
 	}
 }
 
-// html, txt, gif, jpeg, jpg, txt or css
-func hasValidExtension(filename string) bool {
-	fmt.Println("FileName in extension handler: ", filename)
-	validExtension := [6]string{".html", ".js", ".css", ".js", ".css", ".txt"}
-	ext := filepath.Ext(filename)
-	fmt.Println(ext)
-	if ext == "" {
-		return false
-	} else {
-		for _, v := range validExtension {
-			if v == ext {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// [GET, POST]
-func checkRequestType(request string) bool {
-	if strings.HasPrefix(request, "GET") ||
-		strings.HasPrefix(request, "POST") {
-		return true
-	}
-	return false
-}
-
 func sendFile(fileName string, connection net.Conn) {
 	// fmt.Println(fileName)
 	file, err := os.Open("files/" + fileName)
 
 	// filename:  example.txt
+
 	if err != nil {
-		//fmt.Println("Error opening file: " + err.Error())
-		connection.Write([]byte("ERR File not found\n"))
-		panic("Error opening file: " + err.Error())
+		// write error and flush
+		writer := bufio.NewWriter(connection)
+		writer.WriteString(fmt.Sprintf("ERR %s %d\n", fileNotFound.Message, fileNotFound.Code))
+		writer.Flush()
+		fmt.Println("Error opening file: " + err.Error())
 		return
 	}
 
@@ -172,14 +134,14 @@ func sendFile(fileName string, connection net.Conn) {
 	// write file size
 	_, err = connection.Write([]byte(fmt.Sprintf("OK %d\n", size)))
 	if err != nil {
-		panic("Error writing to connection: " + err.Error())
+		fmt.Println("Error writing to connection: " + err.Error())
 		return
 	}
 
 	// copy file content to connection
 	_, err = io.Copy(connection, file)
 	if err != nil {
-		panic("Error copying file: " + err.Error())
+		fmt.Println("Error copying file: " + err.Error())
 		return
 	}
 	// write confirmation (filename, size)
@@ -204,7 +166,7 @@ func downloadFile(fileName string, connection net.Conn, fileSize int, reader *bu
 	_, err = io.CopyN(wrt, reader, int64(fileSize))
 
 	if err != nil {
-		panic("Error writing file: " + err.Error())
+		fmt.Println("Error writing file: " + err.Error())
 		return
 	}
 

@@ -18,7 +18,7 @@ func main() {
 	defer func(conn net.Conn) {
 		err = conn.Close()
 		if err != nil {
-			panic(err)
+			fmt.Println(err.Error())
 			return
 		}
 	}(conn)
@@ -27,7 +27,7 @@ func main() {
 	serverReader := bufio.NewReader(conn)
 
 	for {
-		fmt.Print("Enter filename to download: ")
+		fmt.Print("Enter request: ")
 		request, _ := reader.ReadString('\n')
 		request = strings.TrimSpace(request)
 
@@ -81,7 +81,7 @@ func main() {
 	}
 }
 
-func GetFile(request string, conn net.Conn) {
+func download(request string, conn net.Conn) {
 
 }
 
@@ -112,11 +112,9 @@ func sendFile(request string, conn net.Conn) {
 	stat, _ := file.Stat()
 	size := stat.Size()
 
-	fmt.Printf("Sending %s with %d bytes to client %s\n", fileName, size, conn.RemoteAddr())
-
 	_, err = conn.Write([]byte(fmt.Sprintf("POST %s %d\n", fileName, size)))
 	if err != nil {
-		panic("Error writing to connection: " + err.Error())
+		fmt.Println("Error writing to connection: " + err.Error())
 		return
 	}
 
@@ -127,4 +125,5 @@ func sendFile(request string, conn net.Conn) {
 		return
 	}
 
+	fmt.Printf("Sent %s with %d bytes to Server running at %s\n", fileName, size, conn.RemoteAddr())
 }

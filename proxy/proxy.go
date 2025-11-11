@@ -1,144 +1,192 @@
 package main
 
 import (
+	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"path/filepath"
+	"strconv"
 	"strings"
-	"time"
 )
 
 const (
-	colorReset  = "\033[0m"
-	colorGreen  = "\033[32m"
-	colorBlue   = "\033[34m"
-	colorYellow = "\033[33m"
+	PROXY_ADDR  = ":9000"
+	SERVER_ADDR = "127.0.0.1:8080"
 )
 
-// LogWriter wraps data direction with color and timestamps
-type LogWriter struct {
-	Prefix string
-	Color  string
+type ErrorResponse struct {
+	Message string
+	Code    int
+	flag    bool
 }
 
-func (lw *LogWriter) Write(p []byte) (int, error) {
-	ts := time.Now().Format("15:04:05.000")
-	maxLen := 300
-	if len(p) > maxLen {
-		p = p[:maxLen]
+var (
+	inValidFileExt   = ErrorResponse{"INVALID_FILE_EXTENSION", 400, false}
+	methodNotAllowed = ErrorResponse{"METHOD_NOT_ALLOWED", 501, false}
+	notError         = ErrorResponse{"NOT_ERROR", 0, true}
+)
+
+func main() {
+	listener, err := net.Listen("tcp", PROXY_ADDR)
+	if err != nil {
+		log.Fatal(err)
 	}
-	log.Printf("%s%s [%s] %s%q%s\n",
-		colorYellow, ts, lw.Prefix, lw.Color, p, colorReset)
-	return len(p), nil
+
+	defer func(listener net.Listener) {
+		err := listener.Close()
+		if err != nil {
+			log.Fatal(err)
+			return
+		}
+	}(listener)
+
+	log.Printf("Proxy listening on %s → forwarding to %s", PROXY_ADDR, SERVER_ADDR)
+
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			log.Printf("Accept error: %v", err)
+			continue
+		}
+		go handleConnection(conn)
+	}
 }
-
-// INCOMING_CLIENT_ADDR
-const listenAddr = "0.0.0.0:9000"
-
-// SERVER_ADDR
-const targetAddr = "127.0.0.1:8080"
 
 func handleConnection(clientConn net.Conn) {
 	defer func(clientConn net.Conn) {
 		err := clientConn.Close()
 		if err != nil {
-			panic(err)
+			log.Printf("Error closing client connection: %v", err)
 			return
 		}
 	}(clientConn)
-
-	// Connect to the backend server
-	serverConn, err := net.Dial("tcp", targetAddr)
-	if err != nil {
-		log.Printf("Failed to connect to backend: %v\n", err)
-		return
-	}
-	defer func(serverConn net.Conn) {
-		err := serverConn.Close()
-		if err != nil {
-			panic(err)
-			return
-		}
-	}(serverConn)
-
-	// handle request check [isValidRequest(hasValidRequestMethod, hasValidExtension)]
-
-	// Pipe data both ways concurrently
-	go func() {
-		r := io.TeeReader(clientConn, &LogWriter{Prefix: "[CLIENT -> SERVER]", Color: colorYellow})
-		_, _ = io.Copy(serverConn, r) // client → server
-		serverConn.Close()
-	}()
-
-	r := io.TeeReader(serverConn, &LogWriter{Prefix: "[SERVER -> CLIENT]", Color: colorGreen})
-	_, _ = io.Copy(clientConn, r) // server → client
-}
-
-func isValidRequest(requestString string) (string, bool) {
-	// check request method
-	if hasValidRequestType(requestString) {
-		// fileName
-		fileName := strings.TrimPrefix(requestString, "GET") // returns "fileName"
-		if hasValidExtension(fileName) {
-			return "VALID", true
-		}
-		return "ERR inValid Extension", false
-
-	} else {
-		return "ERR (501) Method not Implemented", false
-	}
-}
-
-// html, txt, gif, jpeg, jpg, txt or css
-func hasValidExtension(filename string) bool {
-	fmt.Println("FileName in extension handler: ", filename)
-	validExtension := [6]string{".html", ".js", ".css", ".js", ".css", ".txt"}
-	ext := filepath.Ext(filename)
-	fmt.Println(ext)
-	if ext == "" {
-		return false
-	} else {
-		for _, v := range validExtension {
-			if v == ext {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func hasValidRequestType(requestType string) bool {
-	if strings.HasPrefix(requestType, "GET") ||
-		strings.HasPrefix(requestType, "POST") {
-		return true
-	}
-	return false
-}
-
-func main() {
-	listener, err := net.Listen("tcp", listenAddr)
-	if err != nil {
-		log.Fatalf("Failed to listen on %s: %v", listenAddr, err)
-	}
-	defer func(listener net.Listener) {
-		err := listener.Close()
-		if err != nil {
-			panic(err)
-			return
-		}
-	}(listener)
-
-	log.Printf("Proxy listening on %s, forwarding to %s\n", listenAddr, targetAddr)
+	clientReader := bufio.NewReader(clientConn)
 
 	for {
-		conn, err := listener.Accept()
-		// io.TeeReader(conn, &LogWriter{Prefix: "CONNECTION ACCEPTED", Color: colorGreen})
+		line, err := clientReader.ReadString('\n')
 		if err != nil {
-			log.Printf("Failed to accept connection: %v", err)
+			if err != io.EOF {
+				log.Printf("Client read error: %v", err)
+			}
+			return
+		}
+		line = strings.TrimSpace(line)
+		if line == "" {
 			continue
 		}
-		go handleConnection(conn)
+		log.Printf("[CLIENT COMMAND] %s", line)
+
+		parts := strings.Fields(line)
+		if len(parts) < 2 {
+			clientConn.Write([]byte("ERR invalid command\n"))
+			continue
+		}
+
+		method := strings.ToUpper(parts[0])
+		fileName := parts[1]
+
+		// REQUEST VALIDATION
+		if !isValidMethod(method) {
+			clientConn.Write([]byte(fmt.Sprintf("ERR %s %d\n", methodNotAllowed.Message, methodNotAllowed.Code)))
+			continue
+		}
+		if !isValidExtension(fileName) {
+			clientConn.Write([]byte(fmt.Sprintf("ERR %s %d\n", inValidFileExt.Message, inValidFileExt.Code)))
+			continue
+		}
+
+		// CONNECT TO SERVER
+		serverConn, err := net.Dial("tcp", SERVER_ADDR)
+		if err != nil {
+			clientConn.Write([]byte("ERR cannot connect to server\n"))
+			continue
+		}
+		serverReader := bufio.NewReader(serverConn)
+
+		// WRITE REQUEST TO SERVER + \n
+		fmt.Fprintf(serverConn, "%s\n", line)
+
+		// POST HANDLER (NOT NEEDED FOR PROXY SECTION)
+		if method == "POST" {
+			if len(parts) != 3 {
+				clientConn.Write([]byte("ERR missing file size\n"))
+				serverConn.Close()
+				continue
+			}
+			fileSize, err := strconv.ParseInt(parts[2], 10, 64)
+			if err != nil {
+				clientConn.Write([]byte("ERR invalid file size\n"))
+				serverConn.Close()
+				continue
+			}
+			log.Printf("Uploading file %s (%d bytes)", fileName, fileSize)
+			_, err = io.CopyN(serverConn, clientReader, fileSize)
+			if err != nil && !errors.Is(err, io.EOF) {
+				log.Printf("Error forwarding POST file: %v", err)
+				serverConn.Close()
+				continue
+			}
+			log.Printf("POST file upload complete")
+		}
+
+		// FORWARD SERVER MESSAGES (e.g File Not Found err (only server can determine if a file exists)
+		statusLine, err := serverReader.ReadString('\n')
+		if len(statusLine) > 0 {
+			_, _ = clientConn.Write([]byte(statusLine))
+		}
+		if err != nil && !errors.Is(err, io.EOF) {
+			log.Printf("Server read error: %v", err)
+			serverConn.Close()
+			continue
+		}
+
+		// READING REQUEST FILE FROM SERVER
+		if method == "GET" && strings.HasPrefix(statusLine, "OK") {
+			parts := strings.Fields(statusLine)
+			if len(parts) != 2 {
+				log.Printf("Invalid server OK response")
+				serverConn.Close()
+				continue
+			}
+			size, err := strconv.ParseInt(parts[1], 10, 64)
+			if err != nil {
+				log.Printf("Invalid file size from server")
+				serverConn.Close()
+				continue
+			}
+			_, err = io.CopyN(clientConn, serverReader, size)
+			if err != nil && !errors.Is(err, io.EOF) {
+				log.Printf("Error forwarding file content: %v", err)
+			}
+			log.Printf("Forwarded %d bytes of GET file data to client", size)
+		}
+
+		err = serverConn.Close()
+		if err != nil {
+			return
+		}
+		log.Printf("REQUEST COMPLETED: %s %s", method, fileName)
 	}
+}
+
+// LAB only wants us to implement GET with proxy
+func isValidMethod(method string) bool {
+	return method == "GET" || method == "POST"
+}
+
+func isValidExtension(filename string) bool {
+	validExtensions := []string{".html", ".js", ".css", ".txt", ".jpg", ".jpeg", ".gif"}
+	ext := filepath.Ext(filename)
+	if ext == "" {
+		return false
+	}
+	for _, v := range validExtensions {
+		if v == ext {
+			return true
+		}
+	}
+	return false
 }
