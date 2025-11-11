@@ -32,7 +32,7 @@ type Response struct {
 }
 
 func main() {
-	rawPort := "8080"
+	rawPort := "8082"
 	if len(os.Args) > 1 {
 		rawPort = os.Args[1]
 	}
@@ -46,23 +46,20 @@ func main() {
 	}
 
 	defer listener.Close()
-	cur := 0
-	for cur < capability {
-		done := make(chan bool)
+	var sem = make(chan int, capability)
+	for {
+		sem <- 1
 		conn, err := listener.Accept()
 		if err != nil {
 			fmt.Printf("Error accepting connection: %s", err)
 		}
-		cur++
-		go handleTCPConnection(conn, done)
-		<-done
-		cur--
+		go handleTCPConnection(conn, sem)
 	}
 }
 
-func handleTCPConnection(conn net.Conn, done chan<- bool) {
+func handleTCPConnection(conn net.Conn, sem chan int) {
 	defer func(conn net.Conn) {
-		done <- true
+		<-sem
 		err := conn.Close()
 		if err != nil {
 			fmt.Printf("Error closing connection: %s", err)

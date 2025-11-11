@@ -45,23 +45,20 @@ func main() {
 	}
 
 	defer listener.Close()
-	cur := 0
-	for cur < capability {
-		done := make(chan bool)
+	var sem = make(chan int, capability)
+	for {
+		sem <- 1
 		conn, err := listener.Accept()
 		if err != nil {
 			fmt.Printf("Error accepting connection: %s", err)
 		}
-		cur++
-		go proxyHTTPRequest(conn, done)
-		<-done
-		cur--
+		go proxyHTTPRequest(conn, sem)
 	}
 }
 
-func proxyHTTPRequest(conn net.Conn, done chan bool) {
+func proxyHTTPRequest(conn net.Conn, sem chan int) {
 	defer func(conn net.Conn) {
-		done <- true
+		<-sem
 		err := conn.Close()
 		if err != nil {
 			fmt.Printf("Error closing connection: %s", err)
