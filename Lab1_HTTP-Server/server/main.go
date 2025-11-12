@@ -4,19 +4,19 @@ import (
 	"bufio"         // buffered reading
 	"bytes"         // create reader from buffer
 	"fmt"           // print to console
+	"io"            // read request body
 	"net"           // tcp listener
 	"net/http"      // parse http request
 	"os"            // OS system functions
 	"path/filepath" // file path and extensions operations
 	"slices"        // slice operations
 	"strconv"       // string to int conversion
-	"strings"       // string operations
 )
 
 const maxConcurrentConnections = 10
 const newLine = "\r\n"
 
-var httpCodeMap = map[string]string {
+var httpCodeMap = map[string]string{
 	"200": "OK",
 	"400": "Bad Request",
 	"404": "Not Found",
@@ -26,8 +26,8 @@ var httpCodeMap = map[string]string {
 
 type httpResponse struct {
 	StatusCode string
-	Headers map[string]string
-	Body *string
+	Headers    map[string]string
+	Body       *string
 	BinaryBody []byte
 }
 
@@ -39,39 +39,19 @@ func isValidExtension(filename string) bool {
 	return slices.Contains(allowedExtensions, extension)
 }
 
-// getContentType returns the correct Content-Type header based on file extension
-func getContentType(filename string) string {
-	extension := filepath.Ext(filename)
-
-	switch extension {
-	case ".html":
-		return "text/html"
-	case ".txt":
-		return "text/plain"
-	case ".gif":
-		return "image/gif"
-	case ".jpeg", ".jpg":
-		return "image/jpeg"
-	case ".css":
-		return "text/css"
-	default:
-		panic("BUG: Invalid file extension reached getContentType")
-	}
-}
-
 // setContentType sets the correct Content-Type header based on file extension
 func setContentType(response *httpResponse, extension string) {
 	switch extension {
 	case ".html":
-		response.Headers["Content-Type"] = "text/html"
+		response.Headers["Content-Type"] = "text/html; charset=UTF-8"
 	case ".txt":
-		response.Headers["Content-Type"] = "text/plain"
+		response.Headers["Content-Type"] = "text/plain; charset=UTF-8"
 	case ".gif":
 		response.Headers["Content-Type"] = "image/gif"
 	case ".jpeg", ".jpg":
 		response.Headers["Content-Type"] = "image/jpeg"
 	case ".css":
-		response.Headers["Content-Type"] = "text/css"
+		response.Headers["Content-Type"] = "text/css; charset=UTF-8"
 	default:
 		panic("BUG: Invalid file extension reached setContentType")
 	}
@@ -83,7 +63,7 @@ func writeHttpResponse(conn net.Conn, response *httpResponse) {
 
 	// status line: HTTP/1.1 <status code> <status text>
 	conn.Write([]byte("HTTP/1.1 " + statusCode + " " + httpCodeMap[statusCode] + newLine))
-	
+
 	// headers
 	for header, value := range response.Headers {
 		conn.Write([]byte(header + ": " + value + newLine))
@@ -92,7 +72,7 @@ func writeHttpResponse(conn net.Conn, response *httpResponse) {
 	// blank line to separate headers from body
 	conn.Write([]byte(newLine))
 
-	// body (if exists)
+	// body or binaryBody (if exists)
 	if response.Body != nil {
 		conn.Write([]byte(*response.Body))
 	} else if response.BinaryBody != nil {
@@ -103,6 +83,95 @@ func writeHttpResponse(conn net.Conn, response *httpResponse) {
 // strPtr create pointer to string, helper function for httpResponse.body
 func strPtr(s string) *string {
 	return &s
+}
+
+// buildErrorResponse creates an error response with given status code and message
+func buildErrorResponse(statusCode, message string) *httpResponse {
+	return &httpResponse{
+		StatusCode: statusCode,
+		Headers:    map[string]string{"Content-Type": "text/plain"},
+		Body:       strPtr(statusCode + " " + httpCodeMap[statusCode] + ": " + message + "\n"),
+	}
+}
+
+// buildTextResponse creates a success response with plain text body
+func buildTextResponse(message string) *httpResponse {
+	return &httpResponse{
+		StatusCode: "200",
+		Headers:    map[string]string{"Content-Type": "text/plain"},
+		Body:       strPtr(message),
+	}
+}
+
+// buildFileResponse creates a response for serving files with correct Content-Type
+func buildFileResponse(fileContent []byte, extension string) *httpResponse {
+	resp := &httpResponse{
+		StatusCode: "200",
+		Headers:    map[string]string{},
+		BinaryBody: fileContent,
+	}
+	setContentType(resp, extension)
+	return resp
+}
+
+// handleGETRequest handles GET requests for file retrieval
+func handleGETRequest(path string) *httpResponse {
+	filePath := "files" + path
+	fmt.Println("Trying to read file:", filePath)
+
+	// validate file extension before reading
+	if !isValidExtension(filePath) {
+		fmt.Println("Invalid file extension for", filePath)
+		return buildErrorResponse("400", "Invalid file extension")
+	}
+
+	// read file from disk
+	fileContent, err := os.ReadFile(filePath)
+	if err != nil {
+		fmt.Println("File not found:", filePath)
+		return buildErrorResponse("404", "File does not exist")
+	}
+
+	// success - return file with correct content type
+	fmt.Println("File found, sending", len(fileContent), "bytes")
+	extension := filepath.Ext(path)
+	return buildFileResponse(fileContent, extension)
+}
+
+// handlePOSTRequest handles POST requests for file upload
+func handlePOSTRequest(request *http.Request, path string) *httpResponse {
+	fmt.Println("Handling POST request for file upload.")
+
+	// read body content from request
+	bodyBytes, err := io.ReadAll(request.Body)
+	if err != nil || len(bodyBytes) == 0 {
+		fmt.Println("Error: POST request has no body.")
+		return buildErrorResponse("400", "No body found")
+	}
+
+	bodyContent := string(bodyBytes)
+	fmt.Println("POST body content:")
+	fmt.Println(bodyContent)
+
+	// build file path and validate extension
+	filePath := "files" + path
+	fmt.Println("Saving uploaded file to:", filePath)
+
+	if !isValidExtension(filePath) {
+		fmt.Println("Invalid file extension for", filePath)
+		return buildErrorResponse("400", "Invalid file extension")
+	}
+
+	// write file to disk
+	err = os.WriteFile(filePath, []byte(bodyContent), 0644)
+	if err != nil {
+		fmt.Println("Error writing file:", err)
+		return buildErrorResponse("500", "Could not save file")
+	}
+
+	// success
+	fmt.Println("File uploaded successfully:", filePath)
+	return buildTextResponse("File uploaded successfully\n")
 }
 
 func handleClientConnection(conn net.Conn, semaphore chan struct{}) {
@@ -124,12 +193,7 @@ func handleClientConnection(conn net.Conn, semaphore chan struct{}) {
 	request, err := http.ReadRequest(bufio.NewReader(bytes.NewReader(buffer[:n])))
 	if err != nil {
 		// 400 Bad Request - malformed HTTP request
-		resp := &httpResponse{
-			StatusCode: "400",
-			Headers:    map[string]string{"Content-Type": "text/plain"},
-			Body:       strPtr("400 Bad Request: Malformed HTTP request\n"),
-		}
-		writeHttpResponse(conn, resp)
+		writeHttpResponse(conn, buildErrorResponse("400", "Malformed HTTP request"))
 		return
 	}
 
@@ -143,97 +207,21 @@ func handleClientConnection(conn net.Conn, semaphore chan struct{}) {
 	// validate HTTP method GET and POST
 	if method != "GET" && method != "POST" {
 		fmt.Println("Unsupported HTTP method:", method)
-		response := "HTTP/1.1 501 Not implemented\r\nContent-Type: text/plain\r\n\r\n501 Not Implemented: Method not supported\n"
-		conn.Write([]byte(response))
+		writeHttpResponse(conn, buildErrorResponse("501", "Method not supported"))
 		return
 	}
 
-	// handle POST method requests - upload and save files
-	if method == "POST" {
-		fmt.Println("Handling POST request for file upload.")
-
-		// read body content from parsed request
-		bodyBytes, err := bufio.NewReader(request.Body).ReadBytes('\x00')
-		if err != nil && len(bodyBytes) == 0 {
-			fmt.Println("Error: POST request has no body.")
-			resp := &httpResponse{
-				StatusCode: "400",
-				Headers:    map[string]string{"Content-Type": "text/plain"},
-				Body:       strPtr("400 Bad Request: No body found\n"),
-			}
-			writeHttpResponse(conn, resp)
-			return
-		}
-
-		// trim null byte if present
-		bodyContent := strings.TrimRight(string(bodyBytes), "\x00")
-
-		fmt.Println("POST body content:")
-		fmt.Println(bodyContent)
-
-		// build the file path
-		filepath := "files" + path
-		fmt.Println("Saving uploaded file to:", filepath)
-
-		// validate file extension before saving
-		if !isValidExtension(filepath) {
-			fmt.Println("Invalid file extension for", filepath)
-			response := "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\n\r\n400 Bad Request: Invalid file extension\n"
-			conn.Write([]byte(response))
-			return
-		}
-
-		// write body content to file
-		err = os.WriteFile(filepath, []byte(bodyContent), 0644)
-		// handle error
-		if err != nil {
-			fmt.Println("Error writing file:", err)
-			response := "HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\n\r\n500 Internal Server Error: Could not save file\n"
-			conn.Write([]byte(response))
-			return
-		}
-
-		// send success response to client
-		fmt.Println("File uploaded successfully:", filepath)
-		response := "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nFile uploaded successfully\n"
-		conn.Write([]byte(response))
-		return	
-	} else if method == "GET" {
-		// parsed path to read file and reply with content to client
-		filepath := "files" + path
-		fmt.Println("Trying to read file:", filepath)
-
-		// validate file extension before reading
-		if !isValidExtension(filepath) {
-			fmt.Println("Invalid file extension for", filepath)
-			contentType := getContentType(filepath)
-			response := "HTTP/1.1 400 Bad Request\r\nContent-Type: " + contentType + "\r\n\r\n400 Bad Request:\n"
-			conn.Write([]byte(response))
-			return
-		}
-
-		fileContent, err := os.ReadFile(filepath)
-		// handle error
-		if err != nil {
-			fmt.Println("File not found", filepath)
-			contentType := getContentType(filepath)
-			response := "HTTP/1.1 404 Not Found\r\nContent-Type: " + contentType + "\r\n\r\nFile Not Found\n"
-			conn.Write([]byte(response))
-		} else {
-			// send file content as response
-			fmt.Println("File found, sending", len(fileContent), "bytes")
-			contentType := getContentType(filepath)
-			response := "HTTP/1.1 200 OK\r\nContent-Type: " + contentType + "\r\n\r\n" + string(fileContent)
-			conn.Write([]byte(response))
-		}
-
-		fmt.Println("Response sent to client.")
+	// route to appropriate handler based on method
+	switch method {
+	case "POST":
+		writeHttpResponse(conn, handlePOSTRequest(request, path))
+	case "GET":
+		writeHttpResponse(conn, handleGETRequest(path))
 	}
 }
 
-
-func main() {
-	// PORT SETUP AND VALIDATION
+// setupPort validates and returns the port from command-line arguments
+func setupPort() string {
 	// check and get port from command line arguments
 	if len(os.Args) < 2 {
 		fmt.Println("Usage: ./http-server <port>")
@@ -249,6 +237,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	return port
+}
+
+// setupTCPListener creates and returns a TCP listener on the given port
+func setupTCPListener(port string) net.Listener {
 	// create a TCP listener on port
 	listener, err := net.Listen("tcp", ":"+port)
 	// handle error
@@ -257,15 +250,19 @@ func main() {
 		os.Exit(1)
 	}
 
-	// remember to close the listener when main exits
-	defer listener.Close()
-	
 	fmt.Println("Server is listening on port", port)
+	return listener
+}
 
-	// CONCURRENCY SETUP
+// setupConcurrency creates and returns a semaphore channel for limiting concurrent connections
+func setupConcurrency() chan struct{} {
 	// semaphore pattern to limit concurrency to 10 simultaneous connections
 	semaphore := make(chan struct{}, maxConcurrentConnections) // buffered channel acting as semaphore
+	return semaphore
+}
 
+// runServer accepts connections in an infinite loop and spawns goroutines to handle each client
+func runServer(listener net.Listener, semaphore chan struct{}) {
 	// wait on client connections (multiple clients by for-loop)
 	for {
 		conn, err := listener.Accept()
@@ -283,4 +280,19 @@ func main() {
 		// spawn goroutine to handle this client connection
 		go handleClientConnection(conn, semaphore)
 	}
+}
+
+func main() {
+	// PORT SETUP AND VALIDATION
+	port := setupPort()
+
+	// TCP LISTENER SETUP
+	listener := setupTCPListener(port)
+	defer listener.Close()
+
+	// CONCURRENCY SETUP
+	semaphore := setupConcurrency()
+
+	// RUN SERVER
+	runServer(listener, semaphore)
 }
