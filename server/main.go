@@ -3,7 +3,9 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -53,32 +55,44 @@ func main() {
 		if err != nil {
 			fmt.Printf("Error accepting connection: %s", err)
 		}
+		//fmt.Println("Accepted connection: one time")
 		go handleTCPConnection(conn, sem)
 	}
 }
 
 func handleTCPConnection(conn net.Conn, sem chan int) {
 	defer func(conn net.Conn) {
-		<-sem
 		err := conn.Close()
 		if err != nil {
 			fmt.Printf("Error closing connection: %s", err)
 		}
+		<-sem
 	}(conn)
-
+	fmt.Printf("New connection from: %s\n", conn.RemoteAddr())
+	fmt.Println("Accepted connection: one time")
 	response := &Response{}
 	response.Headers = make(map[string]string)
 	response.StatusCode = "200"
 
-	buffer := make([]byte, 4096)
-	_, err := conn.Read(buffer)
+	// make bigger for uploading 200kb image.
+	buffer := make([]byte, 4096*4*10*1000)
+	// trap: 1. postman reused tcp connection, so one clicked will trigger into two go routines.
+	// 2. don't use for loop to receive data, the client will not close connection, conn.Read() will get block waiting a close request. then deadlock.
+	n, err := conn.Read(buffer)
+	fmt.Printf("n: %d err: %v\n", n, err)
+	//if n > 0 {
+	//buffer = append(buffer, tmp[:n]...)
+	//}
 	if err != nil {
-		fmt.Printf("Error reading from connection: %s", err)
-		response.Headers["Content-Type"] = "text/plain"
-		response.StatusCode = "400"
-		write(conn, response)
-		return
+		if errors.Is(err, io.EOF) {
+			//break
+		} else {
+			fmt.Printf("Error reading from connection: %s", err)
+			response.StatusCode = "500"
+			return
+		}
 	}
+
 	fmt.Println(string(buffer))
 
 	// parse to http protocol
@@ -104,7 +118,6 @@ func handleTCPConnection(conn net.Conn, sem chan int) {
 	}
 
 	// check method
-	fmt.Println(request.Method)
 	if request.Method != "GET" && request.Method != "POST" {
 		// 501 Not Implemented
 		response.Headers["Content-Type"] = "text/plain"
@@ -113,6 +126,20 @@ func handleTCPConnection(conn net.Conn, sem chan int) {
 		return
 	}
 
+	// post, get dispatch.
+	if request.Method == "POST" {
+		handlePostMethod(request, response, conn)
+	} else if request.Method == "GET" {
+		handleGetMethod(conn, uri, response)
+	}
+
+	// json. json.NewDecoder(request.Body).Decode()
+	// maybe for advanced part as a proxy. http.NewRequestWithContext(context.Background(), "GET", "http://"+conn.LocalAddr().String(), nil)
+
+	return
+}
+
+func handleGetMethod(conn net.Conn, uri string, response *Response) {
 	// find file
 	fileData, err := os.ReadFile(uri[1:])
 	if err != nil {
@@ -133,13 +160,42 @@ func handleTCPConnection(conn net.Conn, sem chan int) {
 	setContentType(response, ext)
 
 	write(conn, response)
-
-	// json. json.NewDecoder(request.Body).Decode()
-	// maybe for advanced part as a proxy. http.NewRequestWithContext(context.Background(), "GET", "http://"+conn.LocalAddr().String(), nil)
-
-	return
 }
+func handlePostMethod(request *http.Request, response *Response, conn net.Conn) {
+	err := request.ParseMultipartForm(32 << 20)
+	if err != nil {
+		fmt.Printf("Error parsing multipart form: %s", err)
+	}
+	fileMap := request.MultipartForm.File
+	for k, v := range fileMap {
+		fmt.Println(k, v[0].Filename)
+		multipartFile := v[0]
+		filename := multipartFile.Filename
+		sourceFD, err := multipartFile.Open()
+		if err != nil {
+			response.StatusCode = "500"
+			write(conn, response)
+			return
+		}
+		defer sourceFD.Close()
 
+		targetFD, err := os.Create("files/" + filename)
+		if err != nil {
+			response.StatusCode = "500"
+			write(conn, response)
+			return
+		}
+		defer targetFD.Close()
+		_, err = io.Copy(targetFD, sourceFD)
+		if err != nil {
+			response.StatusCode = "500"
+			write(conn, response)
+			return
+		}
+
+	}
+	write(conn, response)
+}
 func setContentType(response *Response, ext string) {
 	if ext == ".html" {
 		response.Headers["Content-Type"] = "text/html; charset=utf-8"
