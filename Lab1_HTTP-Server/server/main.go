@@ -1,38 +1,49 @@
 package main
 
 import (
-	//"bufio"		// buffered reading
-	//"bytes"		// create reader from buffer
-	"fmt"     // print to console
-	"net"     // tcp listener
-	"strconv" // string to int conversion
-
-	//"net/http"	// parse http request
+	"bufio"         // buffered reading
+	"bytes"         // create reader from buffer
+	"fmt"           // print to console
+	"net"           // tcp listener
+	"net/http"      // parse http request
 	"os"            // OS system functions
 	"path/filepath" // file path and extensions operations
+	"slices"        // slice operations
+	"strconv"       // string to int conversion
 	"strings"       // string operations
 )
 
+const maxConcurrentConnections = 10
+const newLine = "\r\n"
+
+var httpCodeMap = map[string]string {
+	"200": "OK",
+	"400": "Bad Request",
+	"404": "Not Found",
+	"500": "Internal Server Error",
+	"501": "Not Implemented",
+}
+
+type httpResponse struct {
+	StatusCode string
+	Headers map[string]string
+	Body *string
+	BinaryBody []byte
+}
+
 // validation func that checks if the file extension is allowed by the server
 func isValidExtension(filename string) bool {
-	ext := filepath.Ext(filename)
-
+	extension := filepath.Ext(filename)
 	// allowed extensions
 	allowedExtensions := []string{".html", ".txt", ".gif", ".jpeg", ".jpg", ".css"}
-
-	for _, allowed := range allowedExtensions {
-		if ext == allowed {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(allowedExtensions, extension)
 }
 
 // getContentType returns the correct Content-Type header based on file extension
 func getContentType(filename string) string {
-	ext := filepath.Ext(filename)
+	extension := filepath.Ext(filename)
 
-	switch ext {
+	switch extension {
 	case ".html":
 		return "text/html"
 	case ".txt":
@@ -44,55 +55,90 @@ func getContentType(filename string) string {
 	case ".css":
 		return "text/css"
 	default:
-		return "application/octet-stream" // default binary type
+		panic("BUG: Invalid file extension reached getContentType")
 	}
 }
 
-func handleClientConnection(conn net.Conn, semaphore chan struct{}) {
-	defer func() {
-		<-semaphore // release the semaphore slot
-		conn.Close()
-	}()
+// setContentType sets the correct Content-Type header based on file extension
+func setContentType(response *httpResponse, extension string) {
+	switch extension {
+	case ".html":
+		response.Headers["Content-Type"] = "text/html"
+	case ".txt":
+		response.Headers["Content-Type"] = "text/plain"
+	case ".gif":
+		response.Headers["Content-Type"] = "image/gif"
+	case ".jpeg", ".jpg":
+		response.Headers["Content-Type"] = "image/jpeg"
+	case ".css":
+		response.Headers["Content-Type"] = "text/css"
+	default:
+		panic("BUG: Invalid file extension reached setContentType")
+	}
+}
 
-	// server-read the data from the client connection
-	buffer := make([]byte, 1024)
-	data, err := conn.Read(buffer)
-	// handle error
-	if err != nil {
-		fmt.Println("Error reading from client connection:", err)
-		return	
+// writeHttpResponse sends an HTTP response to the client connection
+func writeHttpResponse(conn net.Conn, response *httpResponse) {
+	statusCode := response.StatusCode
+
+	// status line: HTTP/1.1 <status code> <status text>
+	conn.Write([]byte("HTTP/1.1 " + statusCode + " " + httpCodeMap[statusCode] + newLine))
+	
+	// headers
+	for header, value := range response.Headers {
+		conn.Write([]byte(header + ": " + value + newLine))
 	}
 
-	// convert buffer to string to be able to parse
-	requestStr := string(buffer[:data])
+	// blank line to separate headers from body
+	conn.Write([]byte(newLine))
 
-	// console test print
-	fmt.Println("======== RAW REQUEST ========")
-	fmt.Println(requestStr)
-	fmt.Println("======== END REQUEST ========")
+	// body (if exists)
+	if response.Body != nil {
+		conn.Write([]byte(*response.Body))
+	} else if response.BinaryBody != nil {
+		conn.Write(response.BinaryBody)
+	}
+}
 
-	// PARSE
-	// split the request string into lines
-	lines := strings.Split(requestStr, "\r\n")
+// strPtr create pointer to string, helper function for httpResponse.body
+func strPtr(s string) *string {
+	return &s
+}
 
-	// first line
-	requestLine := lines[0] // e.g., "GET / HTTP/1.1"
-	fmt.Println("Request Line:", requestLine)
+func handleClientConnection(conn net.Conn, semaphore chan struct{}) {
+	// close connection and release semaphore slot when function exits
+	defer func() {
+		conn.Close()
+		<-semaphore // release the semaphore slot
+	}()
 
-	// split the request line into parts
-	parts := strings.Fields(requestLine)
-		
-	var method string
-	var path string
+	// read raw request data
+	buffer := make([]byte, 4096)
+	n, err := conn.Read(buffer)
+	if err != nil {
+		fmt.Println("Error reading from client connection:", err)
+		return
+	}
 
-	if len(parts) >= 2 {
-		method = parts[0] // e.g., "GET"
-		path = parts[1]   // e.g., "/test.html"
-
-		fmt.Println("Parsed Method:", method)
-		fmt.Println("Parsed Path:", path)
+	// parse HTTP request using net/http package
+	request, err := http.ReadRequest(bufio.NewReader(bytes.NewReader(buffer[:n])))
+	if err != nil {
+		// 400 Bad Request - malformed HTTP request
+		resp := &httpResponse{
+			StatusCode: "400",
+			Headers:    map[string]string{"Content-Type": "text/plain"},
+			Body:       strPtr("400 Bad Request: Malformed HTTP request\n"),
 		}
-	// END PARSE
+		writeHttpResponse(conn, resp)
+		return
+	}
+
+	// extract method and path from parsed request
+	method := request.Method
+	path := request.RequestURI
+
+	fmt.Println("Parsed Method:", method)
+	fmt.Println("Parsed Path:", path)
 
 	// validate HTTP method GET and POST
 	if method != "GET" && method != "POST" {
@@ -106,21 +152,22 @@ func handleClientConnection(conn net.Conn, semaphore chan struct{}) {
 	if method == "POST" {
 		fmt.Println("Handling POST request for file upload.")
 
-		// find where body starts
-		bodyStartIndex := strings.Index(requestStr, "\r\n\r\n")
-		// handle error
-		if bodyStartIndex == -1 {
-			fmt.Println("Error: Malformed POST request: no body found.")
-			response := "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\n\r\n400 Bad Request: No body found\n"
-			conn.Write([]byte(response))
+		// read body content from parsed request
+		bodyBytes, err := bufio.NewReader(request.Body).ReadBytes('\x00')
+		if err != nil && len(bodyBytes) == 0 {
+			fmt.Println("Error: POST request has no body.")
+			resp := &httpResponse{
+				StatusCode: "400",
+				Headers:    map[string]string{"Content-Type": "text/plain"},
+				Body:       strPtr("400 Bad Request: No body found\n"),
+			}
+			writeHttpResponse(conn, resp)
 			return
 		}
 
-		// extract body content
-		bodyStartIndex += 4 // skip the "\r\n\r\n"
-		bodyContent := requestStr[bodyStartIndex:]
+		// trim null byte if present
+		bodyContent := strings.TrimRight(string(bodyBytes), "\x00")
 
-		// print body content to console for testing
 		fmt.Println("POST body content:")
 		fmt.Println(bodyContent)
 
@@ -137,7 +184,7 @@ func handleClientConnection(conn net.Conn, semaphore chan struct{}) {
 		}
 
 		// write body content to file
-		err := os.WriteFile(filepath, []byte(bodyContent), 0644)
+		err = os.WriteFile(filepath, []byte(bodyContent), 0644)
 		// handle error
 		if err != nil {
 			fmt.Println("Error writing file:", err)
@@ -217,7 +264,6 @@ func main() {
 
 	// CONCURRENCY SETUP
 	// semaphore pattern to limit concurrency to 10 simultaneous connections
-	const maxConcurrentConnections = 10
 	semaphore := make(chan struct{}, maxConcurrentConnections) // buffered channel acting as semaphore
 
 	// wait on client connections (multiple clients by for-loop)
