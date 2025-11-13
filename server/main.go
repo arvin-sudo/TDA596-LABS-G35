@@ -3,13 +3,14 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"strings"
 )
@@ -54,64 +55,71 @@ func main() {
 		conn, err := listener.Accept()
 		if err != nil {
 			fmt.Printf("Error accepting connection: %s", err)
+			continue
 		}
 		//fmt.Println("Accepted connection: one time")
-		go handleTCPConnection(conn, sem)
+		go handleTCPConnection(conn, sem, rand.IntN(100))
 	}
 }
 
-func handleTCPConnection(conn net.Conn, sem chan int) {
+func handleTCPConnection(conn net.Conn, sem chan int, requestId int) {
 	defer func(conn net.Conn) {
+		if r := recover(); r != nil {
+			fmt.Printf("goroutine panic: %v\n%s", r, debug.Stack())
+		}
 		err := conn.Close()
 		if err != nil {
 			fmt.Printf("Error closing connection: %s", err)
 		}
 		<-sem
 	}(conn)
-	fmt.Printf("New connection from: %s\n", conn.RemoteAddr())
-	fmt.Println("Accepted connection: one time")
+	fmt.Printf("[%d] New connection from: %s\n", requestId, conn.RemoteAddr())
+	fmt.Printf("[%d] Accepted connection: one time\n", requestId)
 	response := &Response{}
 	response.Headers = make(map[string]string)
 	response.StatusCode = "200"
 
-	// make bigger for uploading 200kb image.
-	buffer := make([]byte, 4096*4*10*1000)
+	// 20M. make bigger for uploading 200kb image.
+	buffer := make([]byte, 20*1024*1024)
 	// trap: 1. postman reused tcp connection, so one clicked will trigger into two go routines.
 	// 2. don't use for loop to receive data, the client will not close connection, conn.Read() will get block waiting a close request. then deadlock.
 	n, err := conn.Read(buffer)
-	fmt.Printf("n: %d err: %v\n", n, err)
+	fmt.Printf("[%d] n: %d err: %v\n", requestId, n, err)
 	//if n > 0 {
 	//buffer = append(buffer, tmp[:n]...)
 	//}
 	if err != nil {
-		if errors.Is(err, io.EOF) {
-			//break
-		} else {
-			fmt.Printf("Error reading from connection: %s", err)
-			response.StatusCode = "500"
-			return
-		}
+		fmt.Printf("[%d] Error reading from connection: %s", requestId, err)
+		response.StatusCode = "500"
+		write(conn, response)
+		return
 	}
 
-	fmt.Println(string(buffer))
+	fmt.Printf("[%d] buffer is readed.\n", requestId)
+	// fmt.Println(string(buffer))
 
 	// parse to http protocol
 
 	request, err := http.ReadRequest(bufio.NewReader(bytes.NewReader(buffer)))
+	buffer = nil
 	if err != nil {
 		// 400 Bad Request
+		fmt.Printf("[%d] Error parsing request: %s", requestId, err)
 		response.Headers["Content-Type"] = "text/plain"
 		response.StatusCode = "400"
 		write(conn, response)
 		return
 	}
 
+	fmt.Printf("[%d] construct request ok.\n", requestId)
+
 	// check extension
 	uri := request.RequestURI
-	fmt.Println(uri)
+	fmt.Printf("[%d] uri: %s\n", requestId, uri)
 	if !strings.HasSuffix(uri, ".html") && !strings.HasSuffix(uri, ".txt") && !strings.HasSuffix(uri, ".gif") &&
 		!strings.HasSuffix(uri, ".jpeg") && !strings.HasSuffix(uri, ".jpg") && !strings.HasSuffix(uri, ".css") {
 		// 400 Bad Request
+		fmt.Printf("[%d] Invalid uri format\n", requestId)
 		conn.Write([]byte("HTTP/1.1 400 Bad Request\r\n"))
 		conn.Write([]byte("Content-Type: text/plain; charset=utf-8\r\n"))
 		return
@@ -120,17 +128,19 @@ func handleTCPConnection(conn net.Conn, sem chan int) {
 	// check method
 	if request.Method != "GET" && request.Method != "POST" {
 		// 501 Not Implemented
+		fmt.Printf("[%d] Invalid method: %s\n", requestId, request.Method)
 		response.Headers["Content-Type"] = "text/plain"
 		response.StatusCode = "501"
 		write(conn, response)
 		return
 	}
+	fmt.Printf("[%d] method ok.\n", requestId)
 
 	// post, get dispatch.
 	if request.Method == "POST" {
-		handlePostMethod(request, response, conn)
+		handlePostMethod(request, response, conn, requestId)
 	} else if request.Method == "GET" {
-		handleGetMethod(conn, uri, response)
+		handleGetMethod(conn, uri, response, requestId)
 	}
 
 	// json. json.NewDecoder(request.Body).Decode()
@@ -139,11 +149,13 @@ func handleTCPConnection(conn net.Conn, sem chan int) {
 	return
 }
 
-func handleGetMethod(conn net.Conn, uri string, response *Response) {
+func handleGetMethod(conn net.Conn, uri string, response *Response, requestId int) {
+	fmt.Printf("[%d] into get method.\n", requestId)
 	// find file
 	fileData, err := os.ReadFile(uri[1:])
 	if err != nil {
 		// 404 not found
+		fmt.Printf("[%d] Error reading file: %s", requestId, err)
 		response.Headers["Content-Type"] = "text/plain"
 		response.StatusCode = "404"
 		write(conn, response)
@@ -156,23 +168,27 @@ func handleGetMethod(conn net.Conn, uri string, response *Response) {
 
 	// set headers. (only for content-type right now)
 	ext := filepath.Ext(uri)
-	fmt.Println(ext)
 	setContentType(response, ext)
 
 	write(conn, response)
 }
-func handlePostMethod(request *http.Request, response *Response, conn net.Conn) {
+func handlePostMethod(request *http.Request, response *Response, conn net.Conn, requestId int) {
+	fmt.Printf("[%d] into post method.\n", requestId)
 	err := request.ParseMultipartForm(32 << 20)
 	if err != nil {
-		fmt.Printf("Error parsing multipart form: %s", err)
+		fmt.Printf("[%d] Error parsing multipart form: %s", requestId, err)
+		response.StatusCode = "500"
+		write(conn, response)
+		return
 	}
 	fileMap := request.MultipartForm.File
 	for k, v := range fileMap {
-		fmt.Println(k, v[0].Filename)
+		fmt.Printf("filemap, k: %s, v_filename: %s\n", k, v[0].Filename)
 		multipartFile := v[0]
 		filename := multipartFile.Filename
 		sourceFD, err := multipartFile.Open()
 		if err != nil {
+			fmt.Printf("[%d] Error opening source file: %s", requestId, err)
 			response.StatusCode = "500"
 			write(conn, response)
 			return
@@ -181,6 +197,7 @@ func handlePostMethod(request *http.Request, response *Response, conn net.Conn) 
 
 		targetFD, err := os.Create("files/" + filename)
 		if err != nil {
+			fmt.Printf("[%d] Error creating target file: %s", requestId, err)
 			response.StatusCode = "500"
 			write(conn, response)
 			return
@@ -188,6 +205,7 @@ func handlePostMethod(request *http.Request, response *Response, conn net.Conn) 
 		defer targetFD.Close()
 		_, err = io.Copy(targetFD, sourceFD)
 		if err != nil {
+			fmt.Printf("[%d] Error copying file: %s", requestId, err)
 			response.StatusCode = "500"
 			write(conn, response)
 			return

@@ -4,17 +4,34 @@ it reused tcp connections that goes into two seperate go routines even one reque
 ## command to build docker image
 at root folder 
 
-for server build:
-```docker build -f server/Dockerfile --tag docker-gs-ping . ```
+build server(linux):
+```docker build -f server/Dockerfile --tag docker-server .```
 
-for proxy build:
-```docker build -f proxy/Dockerfile --tag docker-gs-ping-1 .```
+build server(mac):
+```docker buildx build -f server/Dockerfile --platform linux/amd64,linux/arm64 -t daryl1104/docker-server:latest --push .```
 
-for server run:
-```docker run -d --rm -p 8080:8080 -e PORT=8080 --name myserver docker-gs-ping```
+build proxy(linux):
+```docker build -f proxy/Dockerfile --tag docker-proxy .```
 
-for proxy run:
-```docker run -d --rm -p 8081:8081 -e PORT=8081 --name myproxy docker-gs-ping-1```
+build proxy(mac):
+```docker buildx build -f server/Dockerfile --platform linux/amd64,linux/arm64 -t daryl1104/docker-proxy:latest --push .```
+
+run server locally:
+```docker run -d --rm -p 8080:8080 --name myserver docker-server```
+
+run proxy locally:
+```docker run -d --rm -p 8081:8081 --name myproxy docker-proxy```
+
+for pushing server to docker hub:
+```docker tag docker-server daryl1104/docker-server:lastest```
+```docker push daryl1104/docker-server:latest```
+
+for pushing proxy to docker hub:
+```docker tag docker-proxy daryl1104/docker-proxy:lastest```
+```docker push daryl1104/docker-proxy:latest```
+
+following step in cloud:
+pull and run.
 
 ## test by using curl
 server(get): 
@@ -37,3 +54,6 @@ name=FirstName
 
 ```
 
+## login to aws
+```chmod 400 "loginkey.pem"```
+```ssh -i "loginkey.pem" ubuntu@ec2-44-223-37-23.compute-1.amazonaws.com```
