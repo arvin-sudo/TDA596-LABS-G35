@@ -31,12 +31,17 @@ type Response struct {
 }
 
 func main() {
+	start()
+}
+
+func start() {
 	rawPort := "8081"
 	if len(os.Args) > 1 {
 		rawPort = os.Args[1]
 	}
 	if _, err := strconv.Atoi(rawPort); err != nil {
-		panic(fmt.Sprintf("Invalid port number: %s", rawPort))
+		//panic(fmt.Sprintf("Invalid port number: %s", rawPort))
+		rawPort = "8081"
 	}
 
 	listener, err := net.Listen("tcp", ":"+rawPort)
@@ -55,7 +60,6 @@ func main() {
 		go proxyHTTPRequest(conn, sem)
 	}
 }
-
 func proxyHTTPRequest(conn net.Conn, sem chan int) {
 	defer func(conn net.Conn) {
 		<-sem
@@ -88,6 +92,11 @@ func proxyHTTPRequest(conn net.Conn, sem chan int) {
 	}
 	request.Header.Del("Proxy-Connection")
 	fmt.Println(request.RequestURI)
+	if request.Method != "GET" {
+		response.StatusCode = "501"
+		write(conn, response)
+		return
+	}
 	newRequest, err := http.NewRequest(request.Method, request.URL.String(), nil)
 	if err != nil {
 		response.StatusCode = "400"
@@ -114,7 +123,7 @@ func proxyHTTPRequest(conn net.Conn, sem chan int) {
 	}
 	// set body
 	bodyBuffer, err := io.ReadAll(resp.Body)
-	fmt.Println(string(bodyBuffer))
+	//fmt.Println(string(bodyBuffer))
 	if err != nil {
 		response.Headers["Content-Type"] = "text/plain"
 		response.StatusCode = "400"

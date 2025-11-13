@@ -35,12 +35,17 @@ type Response struct {
 }
 
 func main() {
+	start()
+}
+
+func start() {
 	rawPort := "8082"
 	if len(os.Args) > 1 {
 		rawPort = os.Args[1]
 	}
 	if _, err := strconv.Atoi(rawPort); err != nil {
-		panic(fmt.Sprintf("Invalid port number: %s", rawPort))
+		//panic(fmt.Sprintf("Invalid port number: %s", rawPort))
+		rawPort = "8082"
 	}
 
 	listener, err := net.Listen("tcp", ":"+rawPort)
@@ -63,6 +68,9 @@ func main() {
 }
 
 func handleTCPConnection(conn net.Conn, sem chan int, requestId int) {
+	// slow down process to test concurrency capability.
+	// time.Sleep(10 * time.Second)
+
 	defer func(conn net.Conn) {
 		if r := recover(); r != nil {
 			fmt.Printf("goroutine panic: %v\n%s", r, debug.Stack())

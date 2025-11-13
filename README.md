@@ -14,7 +14,7 @@ build proxy(linux):
 ```docker build -f proxy/Dockerfile --tag docker-proxy .```
 
 build proxy(mac):
-```docker buildx build -f server/Dockerfile --platform linux/amd64,linux/arm64 -t daryl1104/docker-proxy:latest --push .```
+```docker buildx build -f proxy/Dockerfile --platform linux/amd64,linux/arm64 -t daryl1104/docker-proxy:latest --push .```
 
 run server locally:
 ```docker run -d --rm -p 8080:8080 --name myserver docker-server```
