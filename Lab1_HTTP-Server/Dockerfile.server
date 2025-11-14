@@ -1,0 +1,65 @@
+# =============================================================================
+# Dockerfile för Lab1 HTTP Server
+# =============================================================================
+# Detta är en "recipe" för hur Docker ska bygga en container med vår server.
+# Varje rad är ett "steg" i byggprocessen.
+
+# STEG 1: Välj basimage
+# ---------------------
+# Vi börjar med en färdig image som har Go installerat.
+# "golang:1.21-alpine" betyder:
+#   - golang: Go programming language
+#   - 1.21: Go version 1.21
+#   - alpine: En väldigt liten Linux-distribution (sparar utrymme och pengar)
+FROM golang:1.21-alpine
+
+# STEG 2: Sätt arbetskatalog
+# ---------------------------
+# Detta är som "cd /app" - alla kommandon körs härifrån
+# Vi väljer /app som standard för Go-applikationer
+WORKDIR /app
+
+# STEG 3: Kopiera source code
+# ----------------------------
+# Kopierar main.go från din dator IN i containern
+# Syntax: COPY <från din dator> <till containern>
+COPY server/main.go .
+
+# STEG 4: Kopiera filer som servern behöver
+# ------------------------------------------
+# Servern läser från ./files/ mappen, så vi måste kopiera den också
+COPY server/files/ ./files/
+
+# STEG 5: Kompilera Go-programmet
+# --------------------------------
+# "go build" kompilerar main.go till en körbar binär fil
+# "-o http_server" betyder "output filename ska vara http_server"
+# Detta skapar filen /app/http_server i containern
+RUN go build -o http_server main.go
+
+# STEG 6: Exponera port
+# ----------------------
+# Detta säger "denna container kommer lyssna på port 8080"
+# Det är dokumentation - ändrar inget, men visar avsikten
+EXPOSE 8080
+
+# STEG 7: Kör servern när containern startas
+# -------------------------------------------
+# ENTRYPOINT: Huvudkommandot som alltid körs
+# CMD: Default-argument (kan overridas när vi startar containern)
+#
+# När containern startar körs: ./http_server 8080
+# Men vi kan ändra port senare: docker run ... http_server 9000
+ENTRYPOINT ["./http_server"]
+CMD ["8080"]
+
+# =============================================================================
+# Hur denna container fungerar:
+# =============================================================================
+# 1. Startar med Linux + Go installerat
+# 2. Kopierar din kod in
+# 3. Kompilerar koden
+# 4. Kör servern på port 8080 (eller annan port du väljer)
+#
+# Resultat: En helt fristående container som KAN KÖRAS VAR SOM HELST!
+# =============================================================================

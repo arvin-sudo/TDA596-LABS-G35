@@ -1,0 +1,47 @@
+# =============================================================================
+# Dockerfile för Lab1 HTTP Proxy
+# =============================================================================
+# Detta bygger en container för proxy-servern.
+# Proxyn är enklare än server - den behöver inga filer, bara koden.
+
+# STEG 1: Välj basimage
+# ---------------------
+# Samma som server - Go 1.21 på Alpine Linux
+FROM golang:1.21-alpine
+
+# STEG 2: Sätt arbetskatalog
+# ---------------------------
+# Standardplats för applikationen i containern
+WORKDIR /app
+
+# STEG 3: Kopiera proxy source code
+# ----------------------------------
+# Proxy behöver bara main.go - inga extra filer
+COPY proxy/main.go .
+
+# STEG 4: Kompilera Go-programmet
+# --------------------------------
+# Bygger proxy-programmet till en körbar binär
+# Output: /app/http_proxy
+RUN go build -o http_proxy main.go
+
+# STEG 5: Exponera port
+# ----------------------
+# Proxy lyssnar default på port 9000
+EXPOSE 9000
+
+# STEG 6: Kör proxyn när containern startas
+# ------------------------------------------
+# Startar: ./http_proxy 9000
+# Du kan ändra port vid start: docker run ... http_proxy 8888
+ENTRYPOINT ["./http_proxy"]
+CMD ["9000"]
+
+# =============================================================================
+# Skillnaden mot Dockerfile.server:
+# =============================================================================
+# 1. Ingen COPY av files/ mapp (proxy behöver inga statiska filer)
+# 2. Proxy bygger till "http_proxy" istället för "http_server"
+# 3. Default port är 9000 istället för 8080
+# 4. Annars identisk struktur - SOLID principle av DRY (Don't Repeat Yourself)
+# =============================================================================
