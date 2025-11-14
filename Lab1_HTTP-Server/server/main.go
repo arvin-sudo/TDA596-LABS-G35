@@ -31,7 +31,16 @@ type httpResponse struct {
 	BinaryBody []byte
 }
 
-// validation func that checks if the file extension is allowed by the server
+// ================
+// HELPER FUNCTIONS
+// ================
+
+// strPtr create pointer to string, helper function for httpResponse.body
+func strPtr(s string) *string {
+	return &s
+}
+
+// isValidExtension checks if the file extension is allowed by the server
 func isValidExtension(filename string) bool {
 	extension := filepath.Ext(filename)
 	// allowed extensions
@@ -55,34 +64,6 @@ func setContentType(response *httpResponse, extension string) {
 	default:
 		panic("BUG: Invalid file extension reached setContentType")
 	}
-}
-
-// writeHttpResponse sends an HTTP response to the client connection
-func writeHttpResponse(conn net.Conn, response *httpResponse) {
-	statusCode := response.StatusCode
-
-	// status line: HTTP/1.1 <status code> <status text>
-	conn.Write([]byte("HTTP/1.1 " + statusCode + " " + httpCodeMap[statusCode] + newLine))
-
-	// headers
-	for header, value := range response.Headers {
-		conn.Write([]byte(header + ": " + value + newLine))
-	}
-
-	// blank line to separate headers from body
-	conn.Write([]byte(newLine))
-
-	// body or binaryBody (if exists)
-	if response.Body != nil {
-		conn.Write([]byte(*response.Body))
-	} else if response.BinaryBody != nil {
-		conn.Write(response.BinaryBody)
-	}
-}
-
-// strPtr create pointer to string, helper function for httpResponse.body
-func strPtr(s string) *string {
-	return &s
 }
 
 // buildErrorResponse creates an error response with given status code and message
@@ -113,6 +94,75 @@ func buildFileResponse(fileContent []byte, extension string) *httpResponse {
 	setContentType(resp, extension)
 	return resp
 }
+
+// writeHttpResponse sends an HTTP response to the client connection
+func writeHttpResponse(conn net.Conn, response *httpResponse) {
+	statusCode := response.StatusCode
+
+	// status line: HTTP/1.1 <status code> <status text>
+	conn.Write([]byte("HTTP/1.1 " + statusCode + " " + httpCodeMap[statusCode] + newLine))
+
+	// headers
+	for header, value := range response.Headers {
+		conn.Write([]byte(header + ": " + value + newLine))
+	}
+
+	// blank line to separate headers from body
+	conn.Write([]byte(newLine))
+
+	// body or binaryBody (if exists)
+	if response.Body != nil {
+		conn.Write([]byte(*response.Body))
+	} else if response.BinaryBody != nil {
+		conn.Write(response.BinaryBody)
+	}
+}
+
+// ============================================================================
+// SETUP FUNCTIONS
+// ============================================================================
+
+// setupPort validates and returns the port from command-line arguments
+func setupPort() string {
+	// check and get port from command line arguments
+	if len(os.Args) < 2 {
+		fmt.Println("Usage: ./http-server <port>")
+		os.Exit(1)
+	}
+	// set port from command line argument
+	port := os.Args[1]
+	// validate port number
+	if _, err := strconv.Atoi(port); err != nil {
+		fmt.Println("Invalid port number:", port)
+		os.Exit(1)
+	}
+	return port
+}
+
+// setupTCPListener creates and returns a TCP listener on the given port
+func setupTCPListener(port string) net.Listener {
+	// create a TCP listener on port
+	listener, err := net.Listen("tcp", ":"+port)
+	// handle error
+	if err != nil {
+		fmt.Println("Error starting TCP listener:", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("Server is listening on port", port)
+	return listener
+}
+
+// setupConcurrency creates and returns a semaphore channel for limiting concurrent connections
+func setupConcurrency() chan struct{} {
+	// semaphore pattern to limit concurrency to 10 simultaneous connections
+	semaphore := make(chan struct{}, maxConcurrentConnections) // buffered channel acting as semaphore
+	return semaphore
+}
+
+// ============================================================================
+// CONNECTION & REQUEST HANDLING
+// ============================================================================
 
 // handleGETRequest handles GET requests for file retrieval
 func handleGETRequest(path string) *httpResponse {
@@ -174,6 +224,7 @@ func handlePOSTRequest(request *http.Request, path string) *httpResponse {
 	return buildTextResponse("File uploaded successfully\n")
 }
 
+// handleClientConnection handles a single client connection
 func handleClientConnection(conn net.Conn, semaphore chan struct{}) {
 	// close connection and release semaphore slot when function exits
 	defer func() {
@@ -218,47 +269,6 @@ func handleClientConnection(conn net.Conn, semaphore chan struct{}) {
 	case "GET":
 		writeHttpResponse(conn, handleGETRequest(path))
 	}
-}
-
-// setupPort validates and returns the port from command-line arguments
-func setupPort() string {
-	// check and get port from command line arguments
-	if len(os.Args) < 2 {
-		fmt.Println("Usage: ./http-server <port>")
-		os.Exit(1)
-	}
-
-	// set port from command line argument
-	port := os.Args[1]
-
-	// validate port number
-	if _, err := strconv.Atoi(port); err != nil {
-		fmt.Println("Invalid port number:", port)
-		os.Exit(1)
-	}
-
-	return port
-}
-
-// setupTCPListener creates and returns a TCP listener on the given port
-func setupTCPListener(port string) net.Listener {
-	// create a TCP listener on port
-	listener, err := net.Listen("tcp", ":"+port)
-	// handle error
-	if err != nil {
-		fmt.Println("Error starting TCP listener:", err)
-		os.Exit(1)
-	}
-
-	fmt.Println("Server is listening on port", port)
-	return listener
-}
-
-// setupConcurrency creates and returns a semaphore channel for limiting concurrent connections
-func setupConcurrency() chan struct{} {
-	// semaphore pattern to limit concurrency to 10 simultaneous connections
-	semaphore := make(chan struct{}, maxConcurrentConnections) // buffered channel acting as semaphore
-	return semaphore
 }
 
 // runServer accepts connections in an infinite loop and spawns goroutines to handle each client
