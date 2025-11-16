@@ -1,6 +1,3 @@
-# Important: don't use postman :( it
-it reused tcp connections that goes into two seperate go routines even one request by clicking once.
-
 ## command to build docker image
 at root folder 
 
