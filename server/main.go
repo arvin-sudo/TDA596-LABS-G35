@@ -178,7 +178,7 @@ func handleGetMethod(conn net.Conn, uri string, response *Response, requestId in
 	if err != nil {
 		// 404 not found
 		fmt.Printf("[%d] Error reading file: %s", requestId, err)
-		response.Headers["Content-Type"] = "text/plain"
+		response.Headers["Content-Type"] = "text/html"
 		response.StatusCode = "404"
 		response.BBody, _ = file2Bytes(requestId, "files/404.html")
 		write(conn, response)

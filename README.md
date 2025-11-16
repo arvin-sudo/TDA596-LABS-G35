@@ -14,10 +14,10 @@ build proxy(mac):
 ```docker buildx build -f proxy/Dockerfile --platform linux/amd64,linux/arm64 -t daryl1104/docker-proxy:latest --push .```
 
 run server locally:
-```docker run -d --rm -p 8080:8080 --name myserver docker-server```
+```docker run -d --workdir=/app/server -p 8080:8080 --name myserver docker-server```
 
 run proxy locally:
-```docker run -d --rm -p 8081:8081 --name myproxy docker-proxy```
+```docker run -d --workdir=/app/proxy -p 8081:8081 --name myproxy docker-proxy```
 
 for pushing server to docker hub:
 ```docker tag docker-server daryl1104/docker-server:lastest```
