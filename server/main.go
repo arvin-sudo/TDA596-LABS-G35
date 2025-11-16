@@ -117,7 +117,7 @@ func handleTCPConnection(conn net.Conn, sem chan int, requestId int) {
 		fmt.Printf("[%d] Error parsing request: %s", requestId, err)
 		response.Headers["Content-Type"] = "text/html"
 		response.StatusCode = "400"
-		response.BBody, _ = file2Bytes("files/404.html")
+		response.BBody, _ = file2Bytes(requestId, "files/404.html")
 		write(conn, response)
 		return
 	}
@@ -174,13 +174,13 @@ func validate(requestId int, request *http.Request, conn net.Conn, response *Res
 
 func handleGetMethod(conn net.Conn, uri string, response *Response, requestId int) {
 	fmt.Printf("[%d] Get into get method.\n", requestId)
-	fileData, err := file2Bytes(uri[1:])
+	fileData, err := file2Bytes(requestId, uri[1:])
 	if err != nil {
 		// 404 not found
 		fmt.Printf("[%d] Error reading file: %s", requestId, err)
 		response.Headers["Content-Type"] = "text/plain"
 		response.StatusCode = "404"
-		response.BBody, _ = file2Bytes("files/404.html")
+		response.BBody, _ = file2Bytes(requestId, "files/404.html")
 		write(conn, response)
 		return
 	}
@@ -268,10 +268,10 @@ func setContentType(response *Response, ext string) {
 
 }
 
-func file2Bytes(filename string) ([]byte, error) {
+func file2Bytes(requestId int, filename string) ([]byte, error) {
 	fileData, err := os.ReadFile(filename)
 	if err != nil {
-		fmt.Printf("[%d] Error reading file: %s", filename, err)
+		fmt.Printf("[%d] Error reading file: [%s], err: %s\n", requestId, filename, err)
 		return []byte("<h1>ERROR</h1>"), err
 	}
 	return fileData, nil
