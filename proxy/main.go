@@ -26,7 +26,6 @@ var httpCodeMap = map[string]string{
 type Response struct {
 	StatusCode string
 	Headers    map[string]string
-	Body       *string
 	BBody      []byte
 }
 
@@ -40,7 +39,6 @@ func start() {
 		rawPort = os.Args[1]
 	}
 	if _, err := strconv.Atoi(rawPort); err != nil {
-		//panic(fmt.Sprintf("Invalid port number: %s", rawPort))
 		rawPort = "8081"
 	}
 
@@ -81,7 +79,7 @@ func proxyHTTPRequest(conn net.Conn, sem chan int) {
 	}
 	fmt.Println(string(buffer))
 
-	//
+	// parse http request.
 	request, err := http.ReadRequest(bufio.NewReader(bytes.NewReader(buffer)))
 	if err != nil {
 		// 400 Bad Request
@@ -90,19 +88,25 @@ func proxyHTTPRequest(conn net.Conn, sem chan int) {
 		write(conn, response)
 		return
 	}
+	// delete proxy header, we don't need to pass it to the real server.
 	request.Header.Del("Proxy-Connection")
-	fmt.Println(request.RequestURI)
+
 	if request.Method != "GET" {
 		response.StatusCode = "501"
 		write(conn, response)
 		return
 	}
+
+	/**
+	construct a new http request to real server, which means as a http client to send request.
+	*/
 	newRequest, err := http.NewRequest(request.Method, request.URL.String(), nil)
 	if err != nil {
 		response.StatusCode = "400"
 		write(conn, response)
 		return
 	}
+	// copy headers
 	for k, v := range request.Header {
 		newRequest.Header.Set(k, v[0])
 	}
@@ -115,15 +119,15 @@ func proxyHTTPRequest(conn net.Conn, sem chan int) {
 		return
 	}
 	defer resp.Body.Close()
+
+	// copy response from real server and construct response.
 	response.StatusCode = resp.Status
 	// set headers
 	for k, v := range resp.Header {
 		response.Headers[k] = v[0]
-		//fmt.Println(k, v)
 	}
 	// set body
 	bodyBuffer, err := io.ReadAll(resp.Body)
-	//fmt.Println(string(bodyBuffer))
 	if err != nil {
 		response.Headers["Content-Type"] = "text/plain"
 		response.StatusCode = "400"
@@ -140,11 +144,7 @@ func write(conn net.Conn, response *Response) {
 		conn.Write([]byte(k + ": " + v + newLine))
 	}
 	conn.Write([]byte(newLine))
-	if response.Body != nil {
-		conn.Write([]byte(*response.Body))
-	}
 	if response.BBody != nil {
 		conn.Write(response.BBody)
 	}
-
 }
