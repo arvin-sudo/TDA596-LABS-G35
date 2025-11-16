@@ -40,7 +40,7 @@ Via proxy all other methods except from HTTP GET are not implemented and will re
 | Error Case              | Description                   | Status Code |
 |-------------------------|-------------------------------|-------------|
 | Invalid File Extension  | File type not allowed         | 400 Bad Request |
-| File Not Found          | Requested file is missing     | 401 Unauthorized |
+| File Not Found          | Requested file is missing     | 404 Not Found |
 
 
 ## Valid Methods and file extensions
