@@ -1,6 +1,8 @@
 #!/bin/bash
 
-URL="http://localhost:8082/server/files/tmp.txt"
+#URL="http://localhost:8080/files/tmp.txt"
+# if you run at root, you may need add /server/ path.
+URL="http://localhost:8080/server/files/tmp.txt"
 
 for i in {1..20}
 do
