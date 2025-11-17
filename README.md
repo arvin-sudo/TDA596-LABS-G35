@@ -14,6 +14,7 @@ This repository contains implementations of an HTTP server and HTTP proxy writte
   * A simple http server.
     * support GET,POST method.
     * support .html, .txt, .gif, .jpeg, .jpg, .css
-   
+
+ # 
 
   > In [Project Description](./PROJ_ARCH.md) we describe the allowed http method types, Error Codes and Messages, Content-Type for valid file types/ext as well as Test case for implemented tests.
