@@ -2,6 +2,10 @@
 
 This is a basic HTTP server written in Go, capable of serving static files and handling file uploads. It listens on a specified port and processes incoming HTTP GET and POST requests.
 
+## Prerequisites
+* Go 1.25 or higher
+* Docker (optional)
+
 ## Features
 
 *   Serves static files (HTML, CSS, TXT, JPG, GIF) from the `files` directory.
@@ -11,6 +15,32 @@ This is a basic HTTP server written in Go, capable of serving static files and h
 *   Custom 404 Not Found page.
 *   Error handling for bad requests (400), not found (404), and not implemented methods (501).
 *   Concurrency control using a semaphore.
+
+## API Endpoints
+### GET /files/{filename}
+Retreive static files from the 'files' directory.
+
+Supported file extensions according to the specifications:
+* `.html` - Content-Type: `text/html`
+* `.txt` - Content-Type: `text/plain`
+* `.gif` - Content-Type: `image/gif`
+* `.jpeg`, `.jpg` - Content-Type: `image/jpeg`
+* `.css` - Content-Type: `text/css`
+
+Response codes:
+* 200 OK - File retrieved successfully
+* 400 Bad Request - Unsupported file extension
+* 404 Not Found - File does not exist
+* 500 Internal Server Error - Error reading file
+* 501 Not Implemented - HTTP method not supported
+
+### POST /files/{filename}
+Handles file uploads using multipart form data. Saves uploaded files to the 'files' directory.
+
+Response Codes:
+* 200 OK - File uploaded successfully
+* 400 Bad Request - Invalid request format
+* 500 Internal Server Error - Error processing upload
 
 ## How to Run
 ### Running locally
@@ -60,6 +90,19 @@ docker run -d --workdir=/app/server -p 8080:8080 daryl1104/docker-server:1.1
          2. Reading file content and storing in `files` folder with the same name of this file.
     5. Writing in http standard message format.
 
+## Implementation Challenges
+
+### Connection Reading Deadlock
+Initial implementation used for loop reading data from TCP Connection. Client applications like Postman do not close connections immediately after sending request data, causing `conn.Read()` to block waiting for FIN packet. This resulted in deadlock where goroutine waits indefinitely. Solution changed to single `conn.Read()` call with large buffer (20MB) to read entire request in one operation. Buffer explicitly set to `nil` after parsing to allow garbage collection and prevent memory exhaustion under high load.
+
+### Concurrect Connection Management
+Lab requirement specifies maximum 10 concurrent connections. Implemented using semaphore pattern with buffered channel of size 10. Each accepted connection sends value to channel before spawning goroutine, blocking if channel full. Connection completion receives from channel, freeing slot for next request.
+
+### HTTP Protocol Parsing
+Initial approach manually parsed HTTP headers using string splitting. Refactored to use `http.ReadRequest()` from standard library for robust parsing. Request data buffered using `bufio.NewReader(bytes.NewReader(buffer))` to provide Reader interface. It eliminated custom parsing logic and handles edge cases in HTTP protocol specification automatically.
+
+### File Upload Buffer Sizing
+GET requests for small files work with default buffer sizes. POST requests with multipart form data for image uploads require larger buffers to accommodate file content. Buffer size increased from 4KB to 20MB. Memory released explicitly after request parsing to prevent heap space exhaustion with many concurrent uploads.
 
 
 ## Testing
