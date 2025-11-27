@@ -1,10 +1,13 @@
 package mr
 
 import (
+	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"io"
 	"log"
 	"net/rpc"
+	"os"
 	"time"
 )
 
@@ -41,7 +44,71 @@ func Worker(mapf func(string, string) []KeyValue,
 		}
 
 		// check what we got of an task type
-		if reply.TaskType == "Wait" {
+		if reply.TaskType == "Map" {
+			// perform map task
+			fmt.Printf("Worker: Received Map task %d for file: '%s'\n", reply.TaskID, reply.Filename)
+
+			// read input file
+			file, err := os.Open(reply.Filename)
+			if err != nil {
+				log.Fatalf("cannot open %v", reply.Filename)
+			}
+			content, err := io.ReadAll(file)
+			if err != nil {
+				log.Fatalf("cannot read %v", reply.Filename)
+			}
+			file.Close()
+
+			// run map function
+			kva := mapf(reply.Filename, string(content))
+			fmt.Printf("Worker: Map task %d produced %v key-value pairs from file: '%s'\n",
+				reply.TaskID, len(kva), reply.Filename)
+
+			// create buckets for each reduce task
+			buckets := make([][]KeyValue, reply.NReduce)
+			for i := range buckets {
+				buckets[i] = []KeyValue{}
+			}
+
+			// partition key-value pairs into buckets
+			for _, kv := range kva {
+				bucket := ihash(kv.Key) % reply.NReduce
+				buckets[bucket] = append(buckets[bucket], kv)
+			}
+
+			// write intermediate files
+			for i := 0; i < reply.NReduce; i++ {
+				filename := fmt.Sprintf("mr-%d-%d", reply.TaskID, i)
+				file, err := os.Create(filename)
+				if err != nil {
+					log.Fatalf("cannot create %v", filename)
+				}
+
+				enc := json.NewEncoder(file)
+				for _, kv := range buckets[i] {
+					err := enc.Encode(&kv)
+					if err != nil {
+						log.Fatalf("cannot encode kv pair %v", kv)
+					}
+				}
+				file.Close()
+			}
+
+			fmt.Printf("Worker: Wrote %d intermediate files for task %d\n",
+				reply.NReduce, reply.TaskID)
+
+			// report task completion to coordinator
+			completeArgs := TaskCompleteArgs{
+				TaskID:   reply.TaskID,
+				TaskType: "Map",
+			}
+			completeReply := TaskCompleteReply{}
+			ok = call("Coordinator.TaskComplete", &completeArgs, &completeReply)
+			if !ok {
+				fmt.Printf("Worker: Failed to report task %d completion\n", reply.TaskID)
+			}
+
+		} else if reply.TaskType == "Wait" {
 			// no task available, wait and try again
 			time.Sleep(time.Second)
 		} else if reply.TaskType == "Exit" {

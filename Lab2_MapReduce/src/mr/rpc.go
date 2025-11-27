@@ -31,9 +31,23 @@ type RequestTaskArgs struct {
 	WorkerID int
 }
 
+// Task reply - coordinator responds with a task
 type RequestTaskReply struct {
 	TaskType string // "Map", "Reduce", or "Wait" or "Exit"
 	TaskID   int
+	Filename string // for Map tasks: input-file to read
+	NReduce  int    // number of reduce-buckets
+}
+
+// Task request complete - worker notifies coordinator of task completion
+type TaskCompleteArgs struct {
+	TaskID   int
+	TaskType string // "Map" or "Reduce"
+}
+
+// Task reply complete - coordinator acknowledges
+type TaskCompleteReply struct {
+	Success bool
 }
 
 // Cook up a unique-ish UNIX-domain socket name
