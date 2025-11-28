@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/rpc"
 	"os"
+	"sort"
 	"time"
 )
 
@@ -107,7 +108,102 @@ func Worker(mapf func(string, string) []KeyValue,
 			if !ok {
 				fmt.Printf("Worker: Failed to report task %d completion\n", reply.TaskID)
 			}
+		} else if reply.TaskType == "Reduce" {
+			// perform reduce task
+			fmt.Printf("Worker: Received Reduce task %d\n", reply.TaskID)
 
+			// FIRST: gather intermediate key-value pairs for this reduce task
+			// read all intermediate files thats named mr-*-<reply.TaskID>
+			// (all mr-*-Y files where Y = reply.TaskID)
+			// example: if TaskID=0, read mr-0-0, mr-1-0, mr-2-0
+
+			intermediate := []KeyValue{}
+
+			// we dont know how many map tasks there were, so we try reading until we cant find more files
+			for mapTaskNum := 0; ; mapTaskNum++ {
+				filename := fmt.Sprintf("mr-%d-%d", mapTaskNum, reply.TaskID)
+
+				file, err := os.Open(filename)
+				if err != nil {
+					// assume no more files to read
+					break
+				}
+
+				// read all key-value pairs from this file
+				dec := json.NewDecoder(file)
+				for {
+					var kv KeyValue
+					if err := dec.Decode(&kv); err != nil {
+						break
+					}
+					intermediate = append(intermediate, kv)
+				}
+				file.Close()
+			}
+
+			// SECOND: sort intermediate key-value pairs by key
+			// group by key
+			// all same keys sorted adjacently
+			// we need to group all values for same key
+			// if sorted first then we can easily loop throught and collect values for same key
+			sort.Slice(intermediate, func(i, j int) bool {
+				return intermediate[i].Key < intermediate[j].Key
+			})
+
+			// THIRD: create output file
+			outputFilename := fmt.Sprintf("mr-out-%d", reply.TaskID)
+			outputFile, err := os.Create(outputFilename)
+			if err != nil {
+				log.Fatalf("cannot create %v", outputFilename)
+			}
+			defer outputFile.Close()
+
+			// FOURTH: loop through intermediate data och group by key.
+			// i points to first occurrence of a key.
+			// j finds the last occurrence of the same key.
+			// then we collect all values from i to j-1.
+			// and call reduce function on that key and its values.
+			// then write output to file.
+			// jumps to next key and we repeat until done.
+			i := 0
+			for i < len(intermediate) {
+				j := i + 1
+
+				// find all values for the same key
+				for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
+					j++
+				}
+
+				// all values for key = intermediate[i].Key
+				// from index i to j-1
+				values := []string{}
+				for k := i; k < j; k++ {
+					values = append(values, intermediate[k].Value)
+				}
+
+				// run reduce function
+				output := reducef(intermediate[i].Key, values)
+
+				// write to output file
+				fmt.Fprintf(outputFile, "%v %v\n", intermediate[i].Key, output)
+
+				// move to next key
+				i = j
+			}
+
+			fmt.Printf("Worker: Reduce task %d wrote output file: '%s'\n",
+				reply.TaskID, outputFilename)
+
+			// FIFTH: report task completion to coordinator
+			completeArgs := TaskCompleteArgs{
+				TaskID:   reply.TaskID,
+				TaskType: "Reduce",
+			}
+			completeReply := TaskCompleteReply{}
+			ok = call("Coordinator.TaskComplete", &completeArgs, &completeReply)
+			if !ok {
+				fmt.Printf("Worker: Failed to report task %d completion\n", reply.TaskID)
+			}
 		} else if reply.TaskType == "Wait" {
 			// no task available, wait and try again
 			time.Sleep(time.Second)

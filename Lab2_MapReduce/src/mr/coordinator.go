@@ -12,14 +12,14 @@ import (
 
 type Coordinator struct {
 	// Your definitions here.
-	mutex sync.Mutex
-	nReduce int
-	mapTasks []MapTask
+	mutex       sync.Mutex
+	nReduce     int
+	mapTasks    []MapTask
+	reduceTasks []ReduceTask
 }
 
-// Your code here -- RPC handlers for the worker to call.
-
 type TaskStatus int
+
 const (
 	Idle TaskStatus = iota
 	InProgress
@@ -27,10 +27,17 @@ const (
 )
 
 type MapTask struct {
-	ID int
+	ID       int
 	Filename string
+	Status   TaskStatus
+}
+
+type ReduceTask struct {
+	ID     int
 	Status TaskStatus
 }
+
+// Your code here -- RPC handlers for the worker to call.
 
 // RequestTask - worker requests a task from the coordinator
 func (c *Coordinator) RequestTask(args *RequestTaskArgs, reply *RequestTaskReply) error {
@@ -38,21 +45,48 @@ func (c *Coordinator) RequestTask(args *RequestTaskArgs, reply *RequestTaskReply
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	// find idle map task
+	// FIRST: check if all map tasks are completed
+	allMapCompleted := true
 	for i := range c.mapTasks {
-		if c.mapTasks[i].Status == Idle {
-			c.mapTasks[i].Status = InProgress
-			reply.TaskType = "Map"
-			reply.TaskID = c.mapTasks[i].ID
-			reply.Filename = c.mapTasks[i].Filename
-			reply.NReduce = c.nReduce
-			fmt.Printf("Coordinator: Assigned map task %d (file: %s) to worker\n",
-						c.mapTasks[i].ID, c.mapTasks[i].Filename)
-			return nil
+		if c.mapTasks[i].Status != Completed {
+			allMapCompleted = false
+			break
 		}
 	}
 
-	// no idle tasks available
+	// !FIRST: if maps not completed, assign idle map tasks
+	if !allMapCompleted {
+		// find idle map task
+		for i := range c.mapTasks {
+			if c.mapTasks[i].Status == Idle {
+				c.mapTasks[i].Status = InProgress
+				reply.TaskType = "Map"
+				reply.TaskID = c.mapTasks[i].ID
+				reply.Filename = c.mapTasks[i].Filename
+				reply.NReduce = c.nReduce
+				fmt.Printf("Coordinator: Assigned map task %d (file: %s) to worker\n",
+					c.mapTasks[i].ID, c.mapTasks[i].Filename)
+				return nil
+			}
+		}
+	}
+
+	// SECOND: maps tasks done -> assign reduce tasks
+	if allMapCompleted {
+		for i := range c.reduceTasks {
+			if c.reduceTasks[i].Status == Idle {
+				c.reduceTasks[i].Status = InProgress
+				reply.TaskType = "Reduce"
+				reply.TaskID = c.reduceTasks[i].ID
+				reply.NReduce = c.nReduce
+				fmt.Printf("Coordinator: Assigned reduce task %d to worker\n",
+					c.reduceTasks[i].ID)
+				return nil
+			}
+		}
+	}
+
+	// THIRD: no idle tasks available -> tell worker to wait
 	reply.TaskType = "Wait"
 	reply.TaskID = 0
 
@@ -95,17 +129,31 @@ func (c *Coordinator) TaskComplete(args *TaskCompleteArgs, reply *TaskCompleteRe
 		}
 	}
 
+	if args.TaskType == "Reduce" {
+		if args.TaskID >= 0 && args.TaskID < len(c.reduceTasks) {
+			c.reduceTasks[args.TaskID].Status = Completed
+			reply.Success = true
+			fmt.Printf("Coordinator: Reduce task %d completed by worker\n", args.TaskID)
+		}
+	}
+
 	return nil
 }
 
 // main/mrcoordinator.go calls Done() periodically to find out
 // if the entire job has finished.
 func (c *Coordinator) Done() bool {
-	ret := false
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
 
-	// Your code here.
+	// check if all reduce tasks are completed
+	for i := range c.reduceTasks {
+		if c.reduceTasks[i].Status != Completed {
+			return false
+		}
+	}
 
-	return ret
+	return true
 }
 
 // create a Coordinator.
@@ -126,6 +174,11 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 			Status:   Idle,
 		}
 		fmt.Printf("Coordinator: Created map task %d for file %s\n", i, filename)
+	}
+
+	c.reduceTasks = make([]ReduceTask, nReduce)
+	for i := 0; i < nReduce; i++ {
+		c.reduceTasks[i] = ReduceTask{ID: i, Status: Idle}
 	}
 
 	c.server()
