@@ -45,6 +45,20 @@ func (c *Coordinator) RequestTask(args *RequestTaskArgs, reply *RequestTaskReply
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
+	// CHECK: if all reduce tasks are completed, tell workers to exit
+	allReduceCompleted := true
+	for i := range c.reduceTasks {
+		if c.reduceTasks[i].Status != Completed {
+			allReduceCompleted = false
+			break
+		}
+	}
+	if allReduceCompleted {
+		reply.TaskType = "Exit"
+		fmt.Println("Coordinator: All tasks completed, signaling workers to exit")
+		return nil
+	}
+
 	// FIRST: check if all map tasks are completed
 	allMapCompleted := true
 	for i := range c.mapTasks {
