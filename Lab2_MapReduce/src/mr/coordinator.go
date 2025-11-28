@@ -8,6 +8,7 @@ import (
 	"net/rpc"
 	"os"
 	"sync"
+	"time"
 )
 
 type Coordinator struct {
@@ -27,14 +28,16 @@ const (
 )
 
 type MapTask struct {
-	ID       int
-	Filename string
-	Status   TaskStatus
+	ID        int
+	Filename  string
+	Status    TaskStatus
+	StartTime time.Time
 }
 
 type ReduceTask struct {
-	ID     int
-	Status TaskStatus
+	ID        int
+	Status    TaskStatus
+	StartTime time.Time
 }
 
 // Your code here -- RPC handlers for the worker to call.
@@ -70,10 +73,23 @@ func (c *Coordinator) RequestTask(args *RequestTaskArgs, reply *RequestTaskReply
 
 	// !FIRST: if maps not completed, assign idle map tasks
 	if !allMapCompleted {
+		// First, check for timed-out tasks and reset them
+		for i := range c.mapTasks {
+			if c.mapTasks[i].Status == InProgress {
+				elapsed := time.Since(c.mapTasks[i].StartTime)
+				if elapsed > 10*time.Second {
+					fmt.Printf("Coordinator: Map task %d timed out after %v, resetting to Idle\n",
+						c.mapTasks[i].ID, elapsed)
+					c.mapTasks[i].Status = Idle
+				}
+			}
+		}
+
 		// find idle map task
 		for i := range c.mapTasks {
 			if c.mapTasks[i].Status == Idle {
 				c.mapTasks[i].Status = InProgress
+				c.mapTasks[i].StartTime = time.Now()
 				reply.TaskType = "Map"
 				reply.TaskID = c.mapTasks[i].ID
 				reply.Filename = c.mapTasks[i].Filename
@@ -87,9 +103,22 @@ func (c *Coordinator) RequestTask(args *RequestTaskArgs, reply *RequestTaskReply
 
 	// SECOND: maps tasks done -> assign reduce tasks
 	if allMapCompleted {
+		// First, check for timed-out reduce tasks and reset them
+		for i := range c.reduceTasks {
+			if c.reduceTasks[i].Status == InProgress {
+				elapsed := time.Since(c.reduceTasks[i].StartTime)
+				if elapsed > 10*time.Second {
+					fmt.Printf("Coordinator: Reduce task %d timed out after %v, resetting to Idle\n",
+						c.reduceTasks[i].ID, elapsed)
+					c.reduceTasks[i].Status = Idle
+				}
+			}
+		}
+
 		for i := range c.reduceTasks {
 			if c.reduceTasks[i].Status == Idle {
 				c.reduceTasks[i].Status = InProgress
+				c.reduceTasks[i].StartTime = time.Now()
 				reply.TaskType = "Reduce"
 				reply.TaskID = c.reduceTasks[i].ID
 				reply.NReduce = c.nReduce
