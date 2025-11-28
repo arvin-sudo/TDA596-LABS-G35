@@ -44,6 +44,21 @@ type TaskDoneArgs struct {
 type TaskDoneReply struct {
 }
 
+// --------- used by http -----------
+type TaskDoneArgsHTTP struct {
+	TaskDoneArgs
+	MyAddress string
+}
+
+type AssignTaskReplyHTTP struct {
+	AssignTaskReply
+	// only for map task to fetch raw file.
+	Port int
+
+	// only for reduce task to get intermediate files.
+	WorkerMapTaskAddrMap map[int]string
+}
+
 // Cook up a unique-ish UNIX-domain socket name
 // in /var/tmp, for the coordinator.
 // Can't use the current directory since

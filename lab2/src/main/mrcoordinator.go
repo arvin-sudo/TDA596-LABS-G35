@@ -22,7 +22,8 @@ func main() {
 
 	fmt.Println(len(os.Args[1:]))
 
-	m := mr.MakeCoordinator(os.Args[1:], 10)
+	//m := mr.MakeCoordinator(os.Args[1:], 10)
+	m := mr.MakeCoordinatorNet(os.Args[1:], 10)
 	for m.Done() == false {
 		time.Sleep(time.Second)
 	}
