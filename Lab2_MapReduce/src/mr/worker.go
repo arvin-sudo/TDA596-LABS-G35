@@ -12,6 +12,8 @@ import (
 	"time"
 )
 
+var myWorkerAddress string
+
 // Map functions return a slice of KeyValue.
 type KeyValue struct {
 	Key   string
@@ -77,10 +79,10 @@ func Worker(mapf func(string, string) []KeyValue,
 				buckets[bucket] = append(buckets[bucket], kv)
 			}
 
-			// write intermediate files
+			// write intermediate output files
 			for i := 0; i < reply.NReduce; i++ {
 				// create temp file for intermediate data
-				tmpFile, err := os.CreateTemp("","mr-tmp-*")
+				tmpFile, err := os.CreateTemp("", "mr-tmp-*")
 				if err != nil {
 					log.Fatalf("cannot create temp file %v", tmpFile.Name())
 				}
@@ -161,20 +163,22 @@ func Worker(mapf func(string, string) []KeyValue,
 				return intermediate[i].Key < intermediate[j].Key
 			})
 
-			// THIRD: create output file
+			// THIRD: create temp output file for atomic writing
 			outputFilename := fmt.Sprintf("mr-out-%d", reply.TaskID)
-			outputFile, err := os.Create(outputFilename)
+
+			// Create temp file
+			tmpFile, err := os.CreateTemp("", "mr-out-tmp-*")
 			if err != nil {
-				log.Fatalf("cannot create %v", outputFilename)
+				log.Fatalf("cannot create temp file")
 			}
-			defer outputFile.Close()
+			tmpFileName := tmpFile.Name()
 
 			// FOURTH: loop through intermediate data och group by key.
 			// i points to first occurrence of a key.
 			// j finds the last occurrence of the same key.
 			// then we collect all values from i to j-1.
 			// and call reduce function on that key and its values.
-			// then write output to file.
+			// then write output to temp file.
 			// jumps to next key and we repeat until done.
 			i := 0
 			for i < len(intermediate) {
@@ -195,11 +199,19 @@ func Worker(mapf func(string, string) []KeyValue,
 				// run reduce function
 				output := reducef(intermediate[i].Key, values)
 
-				// write to output file
-				fmt.Fprintf(outputFile, "%v %v\n", intermediate[i].Key, output)
+				// write to temp file
+				fmt.Fprintf(tmpFile, "%v %v\n", intermediate[i].Key, output)
 
 				// move to next key
 				i = j
+			}
+
+			tmpFile.Close()
+
+			// Atomic rename
+			err = os.Rename(tmpFileName, outputFilename)
+			if err != nil {
+				log.Fatalf("cannot rename %v to %v", tmpFileName, outputFilename)
 			}
 
 			fmt.Printf("Worker: Reduce task %d wrote output file: '%s'\n",
@@ -277,4 +289,8 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 
 	fmt.Println(err)
 	return false
+}
+
+func init() {
+	myWorkerAddress = os.Getenv("WORKER_ADV")
 }

@@ -13,10 +13,12 @@ import (
 
 type Coordinator struct {
 	// Your definitions here.
-	mutex       sync.Mutex
-	nReduce     int
-	mapTasks    []MapTask
-	reduceTasks []ReduceTask
+	mutex        sync.Mutex
+	nReduce      int
+	mapTasks     []MapTask
+	reduceTasks  []ReduceTask
+	workers      map[int]string // workerID -> workerAddress
+	nextWorkerID int
 }
 
 type TaskStatus int
@@ -28,10 +30,12 @@ const (
 )
 
 type MapTask struct {
-	ID        int
-	Filename  string
-	Status    TaskStatus
-	StartTime time.Time
+	ID            int
+	Filename      string
+	Status        TaskStatus
+	StartTime     time.Time
+	WorkerID      int
+	WorkerAddress string
 }
 
 type ReduceTask struct {
@@ -136,6 +140,66 @@ func (c *Coordinator) RequestTask(args *RequestTaskArgs, reply *RequestTaskReply
 	return nil
 }
 
+// task complete - worker notifies coordinator of task completion
+func (c *Coordinator) TaskComplete(args *TaskCompleteArgs, reply *TaskCompleteReply) error {
+	// lock mutex before accessing mapTasks and unlock when done
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	if args.TaskType == "Map" {
+		if args.TaskID >= 0 && args.TaskID < len(c.mapTasks) {
+			c.mapTasks[args.TaskID].Status = Completed
+			// Track which worker completed this map task (for distributed mode)
+			if args.WorkerID != 0 {
+				c.mapTasks[args.TaskID].WorkerID = args.WorkerID
+				c.mapTasks[args.TaskID].WorkerAddress = c.workers[args.WorkerID]
+			}
+			reply.Success = true
+			fmt.Printf("Coordinator: Map task %d completed by worker %d\n", args.TaskID, args.WorkerID)
+		}
+	}
+
+	if args.TaskType == "Reduce" {
+		if args.TaskID >= 0 && args.TaskID < len(c.reduceTasks) {
+			c.reduceTasks[args.TaskID].Status = Completed
+			reply.Success = true
+			fmt.Printf("Coordinator: Reduce task %d completed by worker %d\n", args.TaskID, args.WorkerID)
+		}
+	}
+
+	return nil
+}
+
+// register worker
+func (c *Coordinator) RegisterWorker(args *RegisterWorkerArgs, reply *RegisterWorkerReply) error {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	reply.WorkerID = c.nextWorkerID
+	c.workers[c.nextWorkerID] = args.WorkerAddress
+	c.nextWorkerID++
+
+	fmt.Printf("Coordinator: Registered worker %d at address %s\n",
+		reply.WorkerID, args.WorkerAddress)
+	return nil
+}
+
+// GetMapWorker - returns the address of the worker that completed a map task
+func (c *Coordinator) GetMapWorker(args *GetMapWorkerArgs, reply *GetMapWorkerReply) error {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	if args.MapTaskID >= 0 && args.MapTaskID < len(c.mapTasks) {
+		task := &c.mapTasks[args.MapTaskID]
+		if task.Status == Completed {
+			reply.WorkerAddr = task.WorkerAddress
+			reply.Found = true
+		}
+	}
+
+	return nil
+}
+
 // an example RPC handler.
 //
 // the RPC argument and reply types are defined in rpc.go.
@@ -156,31 +220,6 @@ func (c *Coordinator) server() {
 		log.Fatal("listen error:", e)
 	}
 	go http.Serve(l, nil)
-}
-
-// task complete - worker notifies coordinator of task completion
-func (c *Coordinator) TaskComplete(args *TaskCompleteArgs, reply *TaskCompleteReply) error {
-	// lock mutex before accessing mapTasks and unlock when done
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-
-	if args.TaskType == "Map" {
-		if args.TaskID >= 0 && args.TaskID < len(c.mapTasks) {
-			c.mapTasks[args.TaskID].Status = Completed
-			reply.Success = true
-			fmt.Printf("Coordinator: Map task %d completed by worker\n", args.TaskID)
-		}
-	}
-
-	if args.TaskType == "Reduce" {
-		if args.TaskID >= 0 && args.TaskID < len(c.reduceTasks) {
-			c.reduceTasks[args.TaskID].Status = Completed
-			reply.Success = true
-			fmt.Printf("Coordinator: Reduce task %d completed by worker\n", args.TaskID)
-		}
-	}
-
-	return nil
 }
 
 // main/mrcoordinator.go calls Done() periodically to find out
@@ -207,6 +246,8 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 
 	// Your code here.
 	c.nReduce = nReduce
+	c.workers = make(map[int]string)
+	c.nextWorkerID = 0
 
 	// create a map task for each input file
 	c.mapTasks = make([]MapTask, len(files))

@@ -26,6 +26,8 @@ type ExampleReply struct {
 
 // Add your RPC definitions here.
 
+var coordinatorAddress string
+
 // Task request - worker asks coordinator for a task
 type RequestTaskArgs struct {
 	WorkerID int
@@ -43,6 +45,7 @@ type RequestTaskReply struct {
 type TaskCompleteArgs struct {
 	TaskID   int
 	TaskType string // "Map" or "Reduce"
+	WorkerID int    // ID of worker completing the task (0 in basic mode)
 }
 
 // Task reply complete - coordinator acknowledges
@@ -50,12 +53,51 @@ type TaskCompleteReply struct {
 	Success bool
 }
 
+type RegisterWorkerArgs struct {
+	WorkerAddress string
+}
+
+type RegisterWorkerReply struct {
+	WorkerID int
+}
+
+// GetMapWorker - used by reduce workers to find which worker completed a map task
+type GetMapWorkerArgs struct {
+	MapTaskID int
+}
+
+type GetMapWorkerReply struct {
+	WorkerAddr string
+	Found      bool
+}
+
+// FetchIntermediateFile - used by reduce workers to fetch intermediate files from map workers
+type FetchIntermediateFileArgs struct {
+	MapTaskID    int
+	ReduceTaskID int
+}
+
+type FetchIntermediateFileReply struct {
+	Content []byte
+	Found   bool
+}
+
 // Cook up a unique-ish UNIX-domain socket name
 // in /var/tmp, for the coordinator.
 // Can't use the current directory since
 // Athena AFS doesn't support UNIX-domain sockets.
 func coordinatorSock() string {
+	// advanced mode: TCP address
+	if coordinatorAddress != "" {
+		return coordinatorAddress
+	}
+
+	// basic mode: UNIX-domain socket (for test-mr.sh)
 	s := "/var/tmp/5840-mr-"
 	s += strconv.Itoa(os.Getuid())
 	return s
+}
+
+func init() {
+	coordinatorAddress = os.Getenv("COOR_ADV")
 }
