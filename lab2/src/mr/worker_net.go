@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 import "log"
@@ -41,6 +42,7 @@ func WorkerHTTP(mapf func(string, string) []KeyValue,
 	go func() {
 		// start a detached new process as file server
 		cmd := exec.Command("go", "run", "simple_file_server.go")
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
 			log.Fatal(err)
@@ -59,6 +61,7 @@ func WorkerHTTP(mapf func(string, string) []KeyValue,
 		mutex.Lock()
 		fileServerPort = port
 		mutex.Unlock()
+		cmd.Wait()
 	}()
 
 	//fileServerPort = int(port[0])
@@ -208,7 +211,9 @@ func TaskDoneRequestHTTP(task *AssignTaskReplyHTTP) {
 	args.Id = task.Id
 	args.TaskType = task.TaskType
 	myIPAddress_ := getMyIpAddress()
+	mutex.Lock()
 	fileAddress := fmt.Sprintf("http://%s:%d", myIPAddress_, fileServerPort)
+	mutex.Unlock()
 	//fmt.Println(fileAddress)
 	args.MyAddress = fileAddress
 	reply := TaskDoneReply{}
