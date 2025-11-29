@@ -211,6 +211,7 @@ func getMyIpAddress() string {
 func callHTTP(rpcname string, args interface{}, reply interface{}) bool {
 	c, err := rpc.DialHTTP("tcp", coordinatorIP+":1234")
 	if err != nil {
+		fmt.Printf("[%d] Detect Coordinator failure: %s\n", *id, err)
 		log.Fatal("dialing:", err)
 	}
 	defer c.Close()
