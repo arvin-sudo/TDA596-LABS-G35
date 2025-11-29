@@ -186,7 +186,7 @@ func TaskDoneRequest(task *AssignTaskReply) {
 	reply := TaskDoneReply{}
 	ok := call("Coordinator.TaskDone", &args, &reply)
 	if ok {
-		fmt.Printf("[%d] TaskDoneRequest reply:%v\n", *id, reply)
+		fmt.Printf("[%d] report finish task success. %v\n", *id, args)
 	} else {
 		fmt.Printf("[%d] TaskDoneRequest failed\n", *id)
 	}

@@ -199,7 +199,9 @@ func (c *Coordinator) assignMapTask(args *AssignTaskArgs, reply *AssignTaskReply
 		}
 	}
 
-	time.Sleep(time.Second)
+	// if not found, then send a Wait task
+	reply.Id = 0
+	reply.TaskType = WaitTask
 
 	c.mutex.Lock()
 	c.coordinatorPhase = WaitingMapFinish
@@ -208,7 +210,7 @@ func (c *Coordinator) assignMapTask(args *AssignTaskArgs, reply *AssignTaskReply
 }
 
 func (c *Coordinator) assignReduceTask(args *AssignTaskArgs, reply *AssignTaskReply) error {
-	// 2. if all Map tasks done, then assgin a Reduce task.
+	// 1. if all Map tasks done, then assgin a Reduce task.
 	for _, reduceTask := range c.reduceTasks {
 		if reduceTask.taskStatus == Idle {
 			reduceTask.assignTime = time.Now()
@@ -222,7 +224,9 @@ func (c *Coordinator) assignReduceTask(args *AssignTaskArgs, reply *AssignTaskRe
 		}
 	}
 
-	time.Sleep(time.Second)
+	// 2. if all Reduce tasks were assgined, then send a Wait task
+	reply.Id = 0
+	reply.TaskType = WaitTask
 
 	c.mutex.Lock()
 	c.coordinatorPhase = WaitingReduceFinish
@@ -291,14 +295,15 @@ func (c *Coordinator) waitingReduceFinish(args *AssignTaskArgs, reply *AssignTas
 		c.mutex.Lock()
 		c.coordinatorPhase = WaitingReduceFinish
 		c.mutex.Unlock()
+		reply.Id = 0
+		reply.TaskType = WaitTask
 	} else {
 		c.mutex.Lock()
 		c.coordinatorPhase = AllDone
 		c.mutex.Unlock()
+		reply.Id = 0
+		reply.TaskType = ExitTask
 	}
 
-	reply.Id = 0
-	reply.TaskType = WaitTask
-	// send a task with type WaitReduce
 	return nil
 }

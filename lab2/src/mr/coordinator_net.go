@@ -33,6 +33,7 @@ func (c *CoordinatorNet) AssignTaskHTTP(args *AssignTaskArgs, reply *AssignTaskR
 		}
 		reply.AssignTaskReply = *basicTaskReply
 		reply.Port = coorfileServerPort
+		reply.WorkerMapTaskAddrMap = c.workerMapTaskAddrMap
 	} else if coordinatorPhase == OngoingReduce {
 		basicTaskReply := &AssignTaskReply{}
 		err := c.assignReduceTask(args, basicTaskReply)

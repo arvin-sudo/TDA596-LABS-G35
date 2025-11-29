@@ -9,9 +9,11 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 import "log"
@@ -24,6 +26,10 @@ var myIPAddress *string
 
 var coordinatorIP = "172.31.69.101"
 
+//var coordinatorIP = "127.0.0.1"
+
+var mutex sync.Mutex
+
 // main/mrworker.go calls this function.
 func WorkerHTTP(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
@@ -31,16 +37,49 @@ func WorkerHTTP(mapf func(string, string) []KeyValue,
 		n := rand.IntN(100)
 		id = &n
 	}
+
 	go func() {
-		listener, err := net.Listen("tcp", ":0")
+		// start a detached new process as file server
+		cmd := exec.Command("go", "run", "simple_file_server.go")
+		stdout, err := cmd.StdoutPipe()
 		if err != nil {
-			fmt.Printf("http server listen err: %s \n", err)
+			log.Fatal(err)
 		}
-		fileServerPort = listener.Addr().(*net.TCPAddr).Port
-		fmt.Printf("port: %d\n", fileServerPort)
-		http.Serve(listener, http.FileServer(http.Dir(filePath)))
-		defer listener.Close()
+		if err := cmd.Start(); err != nil {
+			log.Fatal(err)
+		}
+		portBuffer := make([]byte, 8)
+		n, err := stdout.Read(portBuffer)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		fmt.Printf("portBuffer: %s\n", string(portBuffer[:n]))
+		port, err := strconv.Atoi(string(portBuffer[:n]))
+		mutex.Lock()
+		fileServerPort = port
+		mutex.Unlock()
 	}()
+
+	//fileServerPort = int(port[0])
+	//stdout, err := command.StdoutPipe()
+	//if err != nil {
+	//	log.Fatal(err)
+	//}
+	//if err := command.Start(); err != nil {
+	//	log.Fatal(err)
+	//}
+
+	//go func() {
+	//	listener, err := net.Listen("tcp", ":0")
+	//	if err != nil {
+	//		fmt.Printf("http server listen err: %s \n", err)
+	//	}
+	//	fileServerPort = listener.Addr().(*net.TCPAddr).Port
+	//	fmt.Printf("port: %d\n", fileServerPort)
+	//	http.Serve(listener, http.FileServer(http.Dir(filePath)))
+	//	defer listener.Close()
+	//}()
 
 	for {
 		taskReply := AssignTaskRequestHTTP()
@@ -170,12 +209,12 @@ func TaskDoneRequestHTTP(task *AssignTaskReplyHTTP) {
 	args.TaskType = task.TaskType
 	myIPAddress_ := getMyIpAddress()
 	fileAddress := fmt.Sprintf("http://%s:%d", myIPAddress_, fileServerPort)
-	fmt.Print(fileAddress)
+	//fmt.Println(fileAddress)
 	args.MyAddress = fileAddress
 	reply := TaskDoneReply{}
 	ok := callHTTP("CoordinatorNet.TaskDoneHTTP", &args, &reply)
 	if ok {
-		fmt.Printf("[%d] TaskDoneRequestHTTP reply:%v\n", *id, reply)
+		fmt.Printf("[%d] report finish task success. %v\n", *id, args)
 	} else {
 		fmt.Printf("[%d] TaskDoneRequestHTTP failed\n", *id)
 	}
