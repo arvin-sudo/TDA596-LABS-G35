@@ -19,12 +19,10 @@ import "net/rpc"
 
 var fileServerPort int
 
-// var filePath = "/home/ubuntu/lab2"
-// var filePath = "/Users/xinyi/Documents/old_from_mac_2017/daryl/cth/tda596_distributedsystem/lab_demo/lab2/src/main"
 var filePath = "."
 var myIPAddress *string
 
-var coordinatorIP = "127.0.0.1"
+var coordinatorIP = "172.31.69.101"
 
 // main/mrworker.go calls this function.
 func WorkerHTTP(mapf func(string, string) []KeyValue,
@@ -50,6 +48,9 @@ func WorkerHTTP(mapf func(string, string) []KeyValue,
 			fmt.Printf("[%d] taskReply nil.\n", *id)
 			continue
 		}
+
+		// slow down a bit, convenient to test crash some tasks.
+		time.Sleep(5 * time.Second)
 
 		if taskReply.TaskType == MapTask {
 			filename := taskReply.Filename
@@ -158,10 +159,9 @@ func AssignTaskRequestHTTP() *AssignTaskReplyHTTP {
 		fmt.Printf("[%d] AssignTaskRequestHTTP reply:%v\n", *id, reply)
 		return &reply
 	} else {
-		fmt.Printf("[%d] AssignTaskRequestHTTP failed\n", *id)
+		fmt.Printf("[%d] Detect Coordinator failure. AssignTaskRequestHTTP failed. \n", *id)
 		return nil
 	}
-
 }
 
 func TaskDoneRequestHTTP(task *AssignTaskReplyHTTP) {

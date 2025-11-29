@@ -10,7 +10,6 @@ import "net/http"
 
 var coorfileServerPort int
 
-// var coordinatorFilePath = "/Users/xinyi/Documents/old_from_mac_2017/daryl/cth/tda596_distributedsystem/lab_demo/lab2/src/main"
 var coordinatorFilePath = "."
 
 type CoordinatorNet struct {
@@ -34,44 +33,6 @@ func (c *CoordinatorNet) AssignTaskHTTP(args *AssignTaskArgs, reply *AssignTaskR
 		}
 		reply.AssignTaskReply = *basicTaskReply
 		reply.Port = coorfileServerPort
-
-		//// 1. iterate map tasks, find an available one or expired one and return
-		//for _, mapTask := range c.mapTasks {
-		//	if mapTask.taskStatus == Idle { // "Idle", "InProgress", "Done"
-		//		mapTask.assignTime = time.Now()
-		//		mapTask.taskStatus = InProgress
-		//
-		//		reply.Id = mapTask.id
-		//		reply.TaskType = MapTask
-		//		reply.Filename = mapTask.filename
-		//		reply.Port = coorfileServerPort
-		//		reply.NReduce = c.nReduce
-		//		reply.NMap = len(c.mapTasks)
-		//		return nil
-		//	} else if mapTask.taskStatus == InProgress {
-		//		// check expired ? consider reassign
-		//		assignTime := mapTask.assignTime
-		//		if time.Now().After(assignTime.Add(time.Duration(ExpireTimeSecond) * time.Second)) {
-		//			// reassign
-		//			mapTask.assignTime = time.Now()
-		//			mapTask.taskStatus = InProgress
-		//
-		//			reply.Id = mapTask.id
-		//			reply.TaskType = MapTask
-		//			reply.Filename = mapTask.filename
-		//			reply.Port = coorfileServerPort
-		//			reply.NReduce = c.nReduce
-		//			reply.NMap = len(c.mapTasks)
-		//			return nil
-		//		}
-		//	}
-		//}
-		//
-		//time.Sleep(time.Second)
-		//
-		//c.mutex.Lock()
-		//c.coordinatorPhase = WaitingMapFinish
-		//c.mutex.Unlock()
 	} else if coordinatorPhase == OngoingReduce {
 		basicTaskReply := &AssignTaskReply{}
 		err := c.assignReduceTask(args, basicTaskReply)
@@ -81,27 +42,6 @@ func (c *CoordinatorNet) AssignTaskHTTP(args *AssignTaskArgs, reply *AssignTaskR
 		reply.AssignTaskReply = *basicTaskReply
 		reply.Port = coorfileServerPort
 		reply.WorkerMapTaskAddrMap = c.workerMapTaskAddrMap
-
-		//// 2. if all Map tasks done, then assgin a Reduce task.
-		//for _, reduceTask := range c.reduceTasks {
-		//	if reduceTask.taskStatus == Idle {
-		//		reduceTask.assignTime = time.Now()
-		//		reduceTask.taskStatus = InProgress
-		//
-		//		reply.Id = reduceTask.id
-		//		reply.TaskType = ReduceTask
-		//		reply.NReduce = c.nReduce
-		//		reply.NMap = len(c.mapTasks)
-		//		reply.WorkerMapTaskAddrMap = c.workerMapTaskAddrMap
-		//		return nil
-		//	}
-		//}
-		//
-		//time.Sleep(time.Second)
-		//
-		//c.mutex.Lock()
-		//c.coordinatorPhase = WaitingReduceFinish
-		//c.mutex.Unlock()
 	} else if coordinatorPhase == WaitingMapFinish {
 		basicTaskReply := &AssignTaskReply{}
 		err := c.waitingMapFinish(args, basicTaskReply)
@@ -111,44 +51,6 @@ func (c *CoordinatorNet) AssignTaskHTTP(args *AssignTaskArgs, reply *AssignTaskR
 		reply.AssignTaskReply = *basicTaskReply
 		reply.Port = coorfileServerPort
 		reply.WorkerMapTaskAddrMap = c.workerMapTaskAddrMap
-
-		//needToWait := false
-		//for _, mapTask := range c.mapTasks {
-		//	if mapTask.taskStatus == InProgress {
-		//		assignTime := mapTask.assignTime
-		//		if time.Now().After(assignTime.Add(time.Duration(ExpireTimeSecond) * time.Second)) {
-		//			// reassign
-		//			mapTask.assignTime = time.Now()
-		//			mapTask.taskStatus = InProgress
-		//
-		//			reply.Id = mapTask.id
-		//			reply.TaskType = MapTask
-		//			reply.Filename = mapTask.filename
-		//			reply.NReduce = c.nReduce
-		//			reply.NMap = len(c.mapTasks)
-		//			reply.WorkerMapTaskAddrMap = c.workerMapTaskAddrMap
-		//			reply.Port = coorfileServerPort
-		//
-		//			return nil
-		//		}
-		//		needToWait = true
-		//	}
-		//}
-		//
-		//if needToWait {
-		//	c.mutex.Lock()
-		//	c.coordinatorPhase = WaitingReduceFinish
-		//	c.mutex.Unlock()
-		//} else {
-		//	c.mutex.Lock()
-		//	c.coordinatorPhase = OngoingReduce
-		//	c.mutex.Unlock()
-		//}
-		//
-		//reply.Id = 0
-		//reply.TaskType = WaitTask
-		//// send a wait type task
-		//return nil
 	} else if coordinatorPhase == WaitingReduceFinish {
 		basicTaskReply := &AssignTaskReply{}
 		err := c.waitingReduceFinish(args, basicTaskReply)
@@ -158,42 +60,6 @@ func (c *CoordinatorNet) AssignTaskHTTP(args *AssignTaskArgs, reply *AssignTaskR
 		reply.AssignTaskReply = *basicTaskReply
 		reply.WorkerMapTaskAddrMap = c.workerMapTaskAddrMap
 		reply.Port = coorfileServerPort
-
-		//needToWait := false
-		//for _, reduceTask := range c.reduceTasks {
-		//	if reduceTask.taskStatus == InProgress {
-		//		assignTime := reduceTask.assignTime
-		//		if time.Now().After(assignTime.Add(time.Duration(ExpireTimeSecond) * time.Second)) {
-		//			// reassign
-		//			reduceTask.assignTime = time.Now()
-		//			reduceTask.taskStatus = InProgress
-		//
-		//			reply.Id = reduceTask.id
-		//			reply.TaskType = ReduceTask
-		//			reply.NReduce = c.nReduce
-		//			reply.NMap = len(c.mapTasks)
-		//			reply.WorkerMapTaskAddrMap = c.workerMapTaskAddrMap
-		//			reply.Port = coorfileServerPort
-		//
-		//			return nil
-		//		}
-		//		needToWait = true
-		//	}
-		//}
-		//
-		//if needToWait {
-		//	c.mutex.Lock()
-		//	c.coordinatorPhase = WaitingReduceFinish
-		//	c.mutex.Unlock()
-		//} else {
-		//	c.mutex.Lock()
-		//	c.coordinatorPhase = AllDone
-		//	c.mutex.Unlock()
-		//}
-		//
-		//reply.Id = 0
-		//reply.TaskType = WaitTask
-		//return nil
 	} else if coordinatorPhase == AllDone {
 		reply.Id = 0
 		reply.TaskType = ExitTask
@@ -222,9 +88,6 @@ func (c *CoordinatorNet) serverByHttp() {
 	rpc.Register(c)
 	rpc.HandleHTTP()
 	l, e := net.Listen("tcp", ":1234")
-	//sockname := coordinatorSock()
-	//os.Remove(sockname)
-	//l, e := net.Listen("unix", sockname)
 	if e != nil {
 		log.Fatal("listen error:", e)
 	}
