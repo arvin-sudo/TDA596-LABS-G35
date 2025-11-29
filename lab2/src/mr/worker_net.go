@@ -33,7 +33,6 @@ func WorkerHTTP(mapf func(string, string) []KeyValue,
 		n := rand.IntN(100)
 		id = &n
 	}
-	// Your worker implementation here.
 	go func() {
 		listener, err := net.Listen("tcp", ":0")
 		if err != nil {
@@ -45,8 +44,6 @@ func WorkerHTTP(mapf func(string, string) []KeyValue,
 		defer listener.Close()
 	}()
 
-	// uncomment to send the Example RPC to the coordinator.
-	//CallExample()
 	for {
 		taskReply := AssignTaskRequestHTTP()
 		if taskReply == nil {
@@ -54,7 +51,7 @@ func WorkerHTTP(mapf func(string, string) []KeyValue,
 			continue
 		}
 
-		if taskReply.TaskType == "Map" {
+		if taskReply.TaskType == MapTask {
 			filename := taskReply.Filename
 			port := taskReply.Port
 
@@ -94,8 +91,7 @@ func WorkerHTTP(mapf func(string, string) []KeyValue,
 
 			// report map task done
 			TaskDoneRequestHTTP(taskReply)
-		} else if taskReply.TaskType == "Reduce" {
-			//
+		} else if taskReply.TaskType == ReduceTask {
 			nMap := taskReply.NMap
 
 			// fetch all into a big array and sort.
@@ -110,17 +106,10 @@ func WorkerHTTP(mapf func(string, string) []KeyValue,
 					fmt.Printf("[%d] http get err: %s \n", *id, err)
 					continue
 				}
-				//body, err := io.ReadAll(resp.Body)
-				//if err != nil {
-				//	fmt.Printf("[%d] http read body err: %s \n", *id, err)
-				//	continue
-				//}
+
 				decoder := json.NewDecoder(resp.Body)
 				defer resp.Body.Close()
-				// if reduce task number is 0, then: mr-0-0, mr-1-0, mr-2-0.....mr-7-0
-				//file, _ := os.Open(fmt.Sprintf("mr-%d-%d", i, taskReply.Id))
-				// decode from json
-				//decoder := json.NewDecoder(file)
+
 				for {
 					var kv KeyValue
 					if err := decoder.Decode(&kv); err != nil {
@@ -150,11 +139,10 @@ func WorkerHTTP(mapf func(string, string) []KeyValue,
 				i = j
 			}
 			ofile.Close()
-			//time.Sleep(150 * time.Millisecond)
 			TaskDoneRequestHTTP(taskReply)
-		} else if taskReply.TaskType == "Wait" {
+		} else if taskReply.TaskType == WaitTask {
 			time.Sleep(1 * time.Second)
-		} else if taskReply.TaskType == "Done" {
+		} else if taskReply.TaskType == ExitTask {
 			// exit this worker.
 			return
 		}
@@ -220,37 +208,8 @@ func getMyIpAddress() string {
 	return "127.0.0.1"
 }
 
-// example function to show how to make an RPC call to the coordinator.
-//
-// the RPC argument and reply types are defined in rpc.go.
-func CallExample() {
-
-	// declare an argument structure.
-	args := ExampleArgs{}
-
-	// fill in the argument(s).
-	args.X = 99
-
-	// declare a reply structure.
-	reply := ExampleReply{}
-
-	// send the RPC request, wait for the reply.
-	// the "Coordinator.Example" tells the
-	// receiving server that we'd like to call
-	// the Example() method of struct Coordinator.
-	ok := callHTTP("Coordinator.Example", &args, &reply)
-	if ok {
-		// reply.Y should be 100.
-		fmt.Printf("reply.Y %v\n", reply.Y)
-	} else {
-		fmt.Printf("call failed!\n")
-	}
-}
-
 func callHTTP(rpcname string, args interface{}, reply interface{}) bool {
 	c, err := rpc.DialHTTP("tcp", coordinatorIP+":1234")
-	//sockname := coordinatorSock()
-	//c, err := rpc.DialHTTP("unix", sockname)
 	if err != nil {
 		log.Fatal("dialing:", err)
 	}

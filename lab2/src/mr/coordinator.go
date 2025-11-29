@@ -10,195 +10,99 @@ import "os"
 import "net/rpc"
 import "net/http"
 
-const LIMIT_TIME = 10
+const ExpireTimeSecond = 10
 
+type CoordinatorPhase string
+
+const (
+	OngoingMap          CoordinatorPhase = "Map"
+	WaitingMapFinish    CoordinatorPhase = "WaitMap"
+	OngoingReduce       CoordinatorPhase = "Reduce"
+	WaitingReduceFinish CoordinatorPhase = "WaitReduce"
+	AllDone             CoordinatorPhase = "Done"
+)
+
+// keep record of thoses tasks' info and manage which phase should be.
 type Coordinator struct {
-	nReduce     int
-	taskPhase   string // "Map", "WaitMap", "Reduce", "WaitReduce", "Done"
-	mapTasks    []*Task
-	reduceTasks []*Task
+	nReduce          int
+	coordinatorPhase CoordinatorPhase // state machine, e.g "Map", "WaitMap", "Reduce", "WaitReduce", "Done"
+	mapTasks         []*Task
+	reduceTasks      []*Task
 
-	// for locking taskPhase
+	// for locking coordinatorPhase
 	mutex sync.Mutex
 }
 
+type TaskType string
+
+const (
+	MapTask    TaskType = "Map"
+	WaitTask   TaskType = "Wait"
+	ReduceTask TaskType = "Reduce"
+	ExitTask   TaskType = "Exit"
+)
+
+type TaskStatus string
+
+const (
+	Idle       TaskStatus = "Idle"
+	InProgress TaskStatus = "InProgress"
+	Done       TaskStatus = "Done"
+)
+
+// task pass to worker, let worker do something depends.
 type Task struct {
-	id         int    // task number
-	taskStatus string // "Idle", "InProgress", "Done"
+	id         int        // task number
+	taskStatus TaskStatus // e.g "Idle", "InProgress", "Done"
 	assignTime time.Time
-	taskType   string // "Map", "Wait", "Reduce", "Exit"
+	taskType   TaskType // e.g "Map", "Wait", "Reduce", "Exit"
 
 	filename string // only for Map task
 }
 
-// Your code here -- RPC handlers for the worker to call.
+// -----------------RPC handlers for the worker to call.------------------
 func (c *Coordinator) AssignTask(args *AssignTaskArgs, reply *AssignTaskReply) error {
 	c.mutex.Lock()
-	taskPhase := c.taskPhase
+	coordinatorPhase := c.coordinatorPhase
 	c.mutex.Unlock()
-	if taskPhase == "Map" {
-		// 1. iterate map tasks, find an available one or expired one and return
-		for _, mapTask := range c.mapTasks {
-			if mapTask.taskStatus == "Idle" { // "Idle", "InProgress", "Done"
-				mapTask.assignTime = time.Now()
-				mapTask.taskStatus = "InProgress"
-
-				reply.Id = mapTask.id
-				reply.TaskType = "Map"
-				reply.Filename = mapTask.filename
-				reply.NReduce = c.nReduce
-				reply.NMap = len(c.mapTasks)
-				return nil
-			} else if mapTask.taskStatus == "InProgress" {
-				// check expired ? consider reassign
-				assignTime := mapTask.assignTime
-				if time.Now().After(assignTime.Add(time.Duration(LIMIT_TIME) * time.Second)) {
-					// reassign
-					mapTask.assignTime = time.Now()
-					mapTask.taskStatus = "InProgress"
-
-					reply.Id = mapTask.id
-					reply.TaskType = "Map"
-					reply.Filename = mapTask.filename
-					reply.NReduce = c.nReduce
-					reply.NMap = len(c.mapTasks)
-					return nil
-				}
-			}
+	if coordinatorPhase == OngoingMap {
+		err := c.assignMapTask(args, reply)
+		if err != nil {
+			return err
 		}
-
-		time.Sleep(time.Second)
-
-		c.mutex.Lock()
-		c.taskPhase = "WaitMap"
-		c.mutex.Unlock()
-		//needToWait := false
-		//for _, mapTask := range c.mapTasks {
-		//	if mapTask.taskStatus == "InProgress" {
-		//		needToWait = true
-		//	}
-		//}
-		//
-		//if needToWait {
-		//	c.taskPhase = "Wait"
-		//} else {
-		//	c.taskPhase = "Reduce"
-		//}
-
-	} else if taskPhase == "Reduce" {
-		// 2. if all Map tasks done, then assgin a Reduce task.
-		for _, reduceTask := range c.reduceTasks {
-			if reduceTask.taskStatus == "Idle" {
-				reduceTask.assignTime = time.Now()
-				reduceTask.taskStatus = "InProgress"
-
-				reply.Id = reduceTask.id
-				reply.TaskType = "Reduce"
-				reply.NReduce = c.nReduce
-				reply.NMap = len(c.mapTasks)
-				return nil
-			}
+	} else if coordinatorPhase == OngoingReduce {
+		err := c.assignReduceTask(args, reply)
+		if err != nil {
+			return err
 		}
-
-		time.Sleep(time.Second)
-
-		c.mutex.Lock()
-		c.taskPhase = "WaitReduce"
-		c.mutex.Unlock()
-	} else if taskPhase == "WaitMap" {
-		needToWait := false
-		for _, mapTask := range c.mapTasks {
-			if mapTask.taskStatus == "InProgress" {
-				assignTime := mapTask.assignTime
-				if time.Now().After(assignTime.Add(time.Duration(LIMIT_TIME) * time.Second)) {
-					// reassign
-					mapTask.assignTime = time.Now()
-					mapTask.taskStatus = "InProgress"
-
-					reply.Id = mapTask.id
-					reply.TaskType = "Map"
-					reply.Filename = mapTask.filename
-					reply.NReduce = c.nReduce
-					reply.NMap = len(c.mapTasks)
-					return nil
-				}
-				needToWait = true
-			}
+	} else if coordinatorPhase == WaitingMapFinish {
+		err := c.waitingMapFinish(args, reply)
+		if err != nil {
+			return err
 		}
-
-		if needToWait {
-			c.mutex.Lock()
-			c.taskPhase = "WaitMap"
-			c.mutex.Unlock()
-		} else {
-			c.mutex.Lock()
-			c.taskPhase = "Reduce"
-			c.mutex.Unlock()
+	} else if coordinatorPhase == WaitingReduceFinish {
+		err := c.waitingReduceFinish(args, reply)
+		if err != nil {
+			return err
 		}
-
+	} else if coordinatorPhase == AllDone {
 		reply.Id = 0
-		reply.TaskType = "Wait"
-		// send a wait type task
-		return nil
-	} else if taskPhase == "WaitReduce" {
-		needToWait := false
-		for _, reduceTask := range c.reduceTasks {
-			if reduceTask.taskStatus == "InProgress" {
-				assignTime := reduceTask.assignTime
-				if time.Now().After(assignTime.Add(time.Duration(LIMIT_TIME) * time.Second)) {
-					// reassign
-					reduceTask.assignTime = time.Now()
-					reduceTask.taskStatus = "InProgress"
-
-					reply.Id = reduceTask.id
-					reply.TaskType = "Reduce"
-					reply.NReduce = c.nReduce
-					reply.NMap = len(c.mapTasks)
-					return nil
-				}
-				needToWait = true
-			}
-		}
-
-		if needToWait {
-			c.mutex.Lock()
-			c.taskPhase = "WaitReduce"
-			c.mutex.Unlock()
-		} else {
-			c.mutex.Lock()
-			c.taskPhase = "Done"
-			c.mutex.Unlock()
-		}
-
-		reply.Id = 0
-		reply.TaskType = "Wait"
-		// send a task with type WaitReduce
-		return nil
-	} else if taskPhase == "Done" {
-		reply.Id = 0
-		reply.TaskType = "Done"
-		// send a task with type Done
+		reply.TaskType = ExitTask
 		return nil
 	}
 	return nil
 }
 
 func (c *Coordinator) TaskDone(args *TaskDoneArgs, reply *TaskDoneReply) error {
-	if args.TaskType == "Map" {
-		c.mapTasks[args.Id].taskStatus = "Done"
-	} else if args.TaskType == "Reduce" {
-		c.reduceTasks[args.Id].taskStatus = "Done"
+	if args.TaskType == MapTask {
+		c.mapTasks[args.Id].taskStatus = Done
+	} else if args.TaskType == ReduceTask {
+		c.reduceTasks[args.Id].taskStatus = Done
 	}
 	return nil
 }
 
-// an example RPC handler.
-//
-// the RPC argument and reply types are defined in rpc.go.
-func (c *Coordinator) Example(args *ExampleArgs, reply *ExampleReply) error {
-	reply.Y = args.X + 1
-	return nil
-}
+// -----------------RPC handlers ends.------------------
 
 // start a thread that listens for RPCs from worker.go
 func (c *Coordinator) server() {
@@ -219,11 +123,10 @@ func (c *Coordinator) server() {
 func (c *Coordinator) Done() bool {
 	ret := false
 
-	// Your code here.
 	c.mutex.Lock()
-	taskPhase := c.taskPhase
+	coordinatorPhase := c.coordinatorPhase
 	c.mutex.Unlock()
-	if taskPhase == "Done" {
+	if coordinatorPhase == AllDone {
 		return true
 	}
 
@@ -236,7 +139,7 @@ func (c *Coordinator) Done() bool {
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := Coordinator{}
 	c.nReduce = nReduce
-	c.taskPhase = "Map"
+	c.coordinatorPhase = OngoingMap
 	c.mapTasks = make([]*Task, len(files))
 	c.reduceTasks = make([]*Task, nReduce)
 
@@ -244,8 +147,8 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	for i := 0; i < len(files); i++ {
 		task := &Task{
 			id:         i,
-			taskStatus: "Idle",
-			taskType:   "Map",
+			taskStatus: Idle,
+			taskType:   MapTask,
 			filename:   files[i],
 		}
 		c.mapTasks[i] = task
@@ -255,12 +158,147 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	for i := 0; i < nReduce; i++ {
 		task := &Task{
 			id:         i,
-			taskStatus: "Idle",
-			taskType:   "Reduce",
+			taskStatus: Idle,
+			taskType:   ReduceTask,
 		}
 		c.reduceTasks[i] = task
 	}
 
 	c.server()
 	return &c
+}
+
+func (c *Coordinator) assignMapTask(args *AssignTaskArgs, reply *AssignTaskReply) error {
+	// 1. iterate map tasks, find an available one or expired one and return
+	for _, mapTask := range c.mapTasks {
+		if mapTask.taskStatus == Idle { // "Idle", "InProgress", "Done"
+			mapTask.assignTime = time.Now()
+			mapTask.taskStatus = InProgress
+
+			reply.Id = mapTask.id
+			reply.TaskType = MapTask
+			reply.Filename = mapTask.filename
+			reply.NReduce = c.nReduce
+			reply.NMap = len(c.mapTasks)
+			return nil
+		} else if mapTask.taskStatus == InProgress {
+			// check expired ? consider reassign
+			assignTime := mapTask.assignTime
+			if time.Now().After(assignTime.Add(time.Duration(ExpireTimeSecond) * time.Second)) {
+				// reassign
+				mapTask.assignTime = time.Now()
+				mapTask.taskStatus = InProgress
+
+				reply.Id = mapTask.id
+				reply.TaskType = MapTask
+				reply.Filename = mapTask.filename
+				reply.NReduce = c.nReduce
+				reply.NMap = len(c.mapTasks)
+				return nil
+			}
+		}
+	}
+
+	time.Sleep(time.Second)
+
+	c.mutex.Lock()
+	c.coordinatorPhase = WaitingMapFinish
+	c.mutex.Unlock()
+	return nil
+}
+
+func (c *Coordinator) assignReduceTask(args *AssignTaskArgs, reply *AssignTaskReply) error {
+	// 2. if all Map tasks done, then assgin a Reduce task.
+	for _, reduceTask := range c.reduceTasks {
+		if reduceTask.taskStatus == Idle {
+			reduceTask.assignTime = time.Now()
+			reduceTask.taskStatus = InProgress
+
+			reply.Id = reduceTask.id
+			reply.TaskType = ReduceTask
+			reply.NReduce = c.nReduce
+			reply.NMap = len(c.mapTasks)
+			return nil
+		}
+	}
+
+	time.Sleep(time.Second)
+
+	c.mutex.Lock()
+	c.coordinatorPhase = WaitingReduceFinish
+	c.mutex.Unlock()
+	return nil
+}
+
+func (c *Coordinator) waitingMapFinish(args *AssignTaskArgs, reply *AssignTaskReply) error {
+	needToWait := false
+	for _, mapTask := range c.mapTasks {
+		if mapTask.taskStatus == InProgress {
+			assignTime := mapTask.assignTime
+			if time.Now().After(assignTime.Add(time.Duration(ExpireTimeSecond) * time.Second)) {
+				// reassign
+				mapTask.assignTime = time.Now()
+				mapTask.taskStatus = InProgress
+
+				reply.Id = mapTask.id
+				reply.TaskType = MapTask
+				reply.Filename = mapTask.filename
+				reply.NReduce = c.nReduce
+				reply.NMap = len(c.mapTasks)
+				return nil
+			}
+			needToWait = true
+		}
+	}
+
+	if needToWait {
+		c.mutex.Lock()
+		c.coordinatorPhase = WaitingMapFinish
+		c.mutex.Unlock()
+	} else {
+		c.mutex.Lock()
+		c.coordinatorPhase = OngoingReduce
+		c.mutex.Unlock()
+	}
+
+	reply.Id = 0
+	reply.TaskType = WaitTask
+	// send a wait type task
+	return nil
+}
+
+func (c *Coordinator) waitingReduceFinish(args *AssignTaskArgs, reply *AssignTaskReply) error {
+	needToWait := false
+	for _, reduceTask := range c.reduceTasks {
+		if reduceTask.taskStatus == InProgress {
+			assignTime := reduceTask.assignTime
+			if time.Now().After(assignTime.Add(time.Duration(ExpireTimeSecond) * time.Second)) {
+				// reassign
+				reduceTask.assignTime = time.Now()
+				reduceTask.taskStatus = InProgress
+
+				reply.Id = reduceTask.id
+				reply.TaskType = ReduceTask
+				reply.NReduce = c.nReduce
+				reply.NMap = len(c.mapTasks)
+				return nil
+			}
+			needToWait = true
+		}
+	}
+
+	if needToWait {
+		c.mutex.Lock()
+		c.coordinatorPhase = WaitingReduceFinish
+		c.mutex.Unlock()
+	} else {
+		c.mutex.Lock()
+		c.coordinatorPhase = AllDone
+		c.mutex.Unlock()
+	}
+
+	reply.Id = 0
+	reply.TaskType = WaitTask
+	// send a task with type WaitReduce
+	return nil
 }

@@ -2,7 +2,9 @@ package mr
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"math/rand/v2"
 	"os"
@@ -35,17 +37,13 @@ func ihash(key string) int {
 	return int(h.Sum32() & 0x7fffffff)
 }
 
-// main/mrworker.go calls this function.
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 	if id == nil {
 		n := rand.IntN(100)
 		id = &n
 	}
-	// Your worker implementation here.
 
-	// uncomment to send the Example RPC to the coordinator.
-	//CallExample()
 	for {
 		taskReply := AssignTaskRequest()
 		if taskReply == nil {
@@ -53,95 +51,119 @@ func Worker(mapf func(string, string) []KeyValue,
 			continue
 		}
 
-		if taskReply.TaskType == "Map" {
-			filename := taskReply.Filename
-			// deal with file.
-			file, err := os.Open(filename)
+		if taskReply.TaskType == MapTask {
+			err := DoMapTask(mapf, taskReply)
 			if err != nil {
-				fmt.Printf("[%d] open file error: %v\n", *id, err)
+				return
 			}
-			content, err := ioutil.ReadAll(file)
-			if err != nil {
-				fmt.Printf("[%d] read file error: %v\n", *id, err)
-			}
-			file.Close()
-			kva := mapf(filename, string(content))
-			reduce := taskReply.NReduce
-
-			// create nReduce tmp files to store intermediate result.
-			files := make([]*os.File, reduce)
-			jsonEncoders := make([]*json.Encoder, reduce)
-			for i := 0; i < reduce; i++ {
-				f, _ := ioutil.TempFile(".", "mr-tmp-*")
-				jsonEncoders[i] = json.NewEncoder(f)
-				files[i] = f
-			}
-
-			for _, kv := range kva {
-				// get index
-				i := ihash(kv.Key) % reduce
-				// write to the corresponding file in json format.
-				jsonEncoders[i].Encode(&kv)
-			}
-
-			for i := 0; i < reduce; i++ {
-				files[i].Close()
-				os.Rename(files[i].Name(), fmt.Sprintf("mr-%d-%d", taskReply.Id, i))
-			}
-
 			// report map task done
 			TaskDoneRequest(taskReply)
-		} else if taskReply.TaskType == "Reduce" {
-			//
-			nMap := taskReply.NMap
-
-			// fetch all into a big array and sort.
-			intermediate := []KeyValue{}
-			for i := 0; i < nMap; i++ {
-
-				// if reduce task number is 0, then: mr-0-0, mr-1-0, mr-2-0.....mr-7-0
-				file, _ := os.Open(fmt.Sprintf("mr-%d-%d", i, taskReply.Id))
-				// decode from json
-				decoder := json.NewDecoder(file)
-				for {
-					var kv KeyValue
-					if err := decoder.Decode(&kv); err != nil {
-						break
-					}
-					intermediate = append(intermediate, kv)
-				}
+		} else if taskReply.TaskType == ReduceTask {
+			err := DoReduceTask(reducef, taskReply)
+			if err != nil {
+				fmt.Printf("[%d] DoReduceTask failed: %s\n", *id, err)
+				return
 			}
-			sort.Sort(ByKey(intermediate))
-			oname := fmt.Sprintf("mr-out-%d", taskReply.Id)
-			ofile, _ := os.Create(oname)
-			i := 0
-			for i < len(intermediate) {
-				j := i + 1
-				for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
-					j++
-				}
-				values := []string{}
-				for k := i; k < j; k++ {
-					values = append(values, intermediate[k].Value)
-				}
-				output := reducef(intermediate[i].Key, values)
-
-				// this is the correct format for each line of Reduce output.
-				fmt.Fprintf(ofile, "%v %v\n", intermediate[i].Key, output)
-
-				i = j
-			}
-			ofile.Close()
-			//time.Sleep(150 * time.Millisecond)
+			// report map task done
 			TaskDoneRequest(taskReply)
-		} else if taskReply.TaskType == "Wait" {
+		} else if taskReply.TaskType == WaitTask {
 			time.Sleep(1 * time.Second)
-		} else if taskReply.TaskType == "Done" {
+		} else if taskReply.TaskType == ExitTask {
 			// exit this worker.
 			return
 		}
 
 	}
+}
+func DoMapTask(mapf func(string, string) []KeyValue, taskReply *AssignTaskReply) error {
+	filename := taskReply.Filename
+	// deal with file.
+	file, err := os.Open(filename)
+	if err != nil {
+		fmt.Printf("[%d] open file error: %v\n", *id, err)
+		return err
+	}
+	content, err := ioutil.ReadAll(file)
+	if err != nil {
+		if !errors.Is(err, io.EOF) {
+			fmt.Printf("[%d] read file error: %v\n", *id, err)
+			return err
+		}
+	}
+	file.Close()
+	kva := mapf(filename, string(content))
+	reduce := taskReply.NReduce
+
+	// create nReduce tmp files to store intermediate result.
+	files := make([]*os.File, reduce)
+	jsonEncoders := make([]*json.Encoder, reduce)
+	for i := 0; i < reduce; i++ {
+		f, _ := ioutil.TempFile(".", "mr-tmp-*")
+		jsonEncoders[i] = json.NewEncoder(f)
+		files[i] = f
+	}
+
+	for _, kv := range kva {
+		// get index
+		i := ihash(kv.Key) % reduce
+		// write to the corresponding file in json format.
+		jsonEncoders[i].Encode(&kv)
+	}
+
+	for i := 0; i < reduce; i++ {
+		os.Rename(files[i].Name(), fmt.Sprintf("mr-%d-%d", taskReply.Id, i))
+		files[i].Close()
+	}
+	return nil
+}
+func DoReduceTask(reducef func(string, []string) string, taskReply *AssignTaskReply) error {
+	nMap := taskReply.NMap
+
+	// fetch all into a big array and sort.
+	intermediate := []KeyValue{}
+	for i := 0; i < nMap; i++ {
+
+		// if reduce task number is 0, then: mr-0-0, mr-1-0, mr-2-0.....mr-7-0
+		file, err := os.Open(fmt.Sprintf("mr-%d-%d", i, taskReply.Id))
+		if err != nil {
+			fmt.Printf("[%d] open file error: %v\n", *id, err)
+		}
+		// decode from json
+		decoder := json.NewDecoder(file)
+		for {
+			var kv KeyValue
+			if err := decoder.Decode(&kv); err != nil {
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				fmt.Printf("[%d] decoder error: %s\n", *id, err)
+				return err
+			}
+			intermediate = append(intermediate, kv)
+		}
+	}
+	sort.Sort(ByKey(intermediate))
+	oname := fmt.Sprintf("mr-out-%d", taskReply.Id)
+	ofile, _ := os.Create(oname)
+	i := 0
+	for i < len(intermediate) {
+		j := i + 1
+		for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
+			j++
+		}
+		values := []string{}
+		for k := i; k < j; k++ {
+			values = append(values, intermediate[k].Value)
+		}
+		output := reducef(intermediate[i].Key, values)
+
+		// this is the correct format for each line of Reduce output.
+		fmt.Fprintf(ofile, "%v %v\n", intermediate[i].Key, output)
+
+		i = j
+	}
+	defer ofile.Close()
+	return nil
 }
 func AssignTaskRequest() *AssignTaskReply {
 	args := AssignTaskArgs{}
@@ -175,7 +197,6 @@ func TaskDoneRequest(task *AssignTaskReply) {
 // usually returns true.
 // returns false if something goes wrong.
 func call(rpcname string, args interface{}, reply interface{}) bool {
-	// c, err := rpc.DialHTTP("tcp", "127.0.0.1"+":1234")
 	sockname := coordinatorSock()
 	c, err := rpc.DialHTTP("unix", sockname)
 	if err != nil {

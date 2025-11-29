@@ -9,26 +9,14 @@ package mr
 import "os"
 import "strconv"
 
-//
-// example to show how to declare the arguments
-// and reply for an RPC.
-//
-
-type ExampleArgs struct {
-	X int
-}
-
-type ExampleReply struct {
-	Y int
-}
-
-// Add your RPC definitions here.
+// RPC definitions
 type AssignTaskArgs struct {
+	// empty because no useful info need to be replied.
 }
 
 type AssignTaskReply struct {
 	Id       int
-	TaskType string // Map, Reduce, Wait, Done
+	TaskType TaskType
 	Filename string
 	NReduce  int
 	NMap     int
@@ -36,12 +24,11 @@ type AssignTaskReply struct {
 
 type TaskDoneArgs struct {
 	Id       int
-	TaskType string // Map, Reduce, Wait, Done
-	// Filename string
-	// NReduce  int
+	TaskType TaskType
 }
 
 type TaskDoneReply struct {
+	// empty because no useful info need to be replied.
 }
 
 // --------- used by http -----------
