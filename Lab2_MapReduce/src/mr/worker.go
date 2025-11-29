@@ -79,20 +79,31 @@ func Worker(mapf func(string, string) []KeyValue,
 
 			// write intermediate files
 			for i := 0; i < reply.NReduce; i++ {
-				filename := fmt.Sprintf("mr-%d-%d", reply.TaskID, i)
-				file, err := os.Create(filename)
+				// create temp file for intermediate data
+				tmpFile, err := os.CreateTemp("","mr-tmp-*")
 				if err != nil {
-					log.Fatalf("cannot create %v", filename)
+					log.Fatalf("cannot create temp file %v", tmpFile.Name())
 				}
+				tmpFileName := tmpFile.Name()
 
-				enc := json.NewEncoder(file)
+				// write to temp file
+				enc := json.NewEncoder(tmpFile)
 				for _, kv := range buckets[i] {
 					err := enc.Encode(&kv)
 					if err != nil {
+						tmpFile.Close()
+						os.Remove(tmpFileName)
 						log.Fatalf("cannot encode kv pair %v", kv)
 					}
 				}
-				file.Close()
+				tmpFile.Close()
+
+				// atomic rename
+				finalFilename := fmt.Sprintf("mr-%d-%d", reply.TaskID, i)
+				err = os.Rename(tmpFileName, finalFilename)
+				if err != nil {
+					log.Fatalf("cannot rename temp file to final file %v", finalFilename)
+				}
 			}
 
 			fmt.Printf("Worker: Wrote %d intermediate files for task %d\n",
