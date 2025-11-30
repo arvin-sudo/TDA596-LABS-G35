@@ -110,26 +110,28 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 
 			// write intermediate output files
 			for i := 0; i < reply.NReduce; i++ {
-				// create temp file for intermediate data
+				// 1: create temp file for intermediate data
 				tmpFile, err := os.CreateTemp("", "mr-tmp-*")
 				if err != nil {
 					log.Fatalf("cannot create temp file %v", tmpFile.Name())
 				}
 				tmpFileName := tmpFile.Name()
 
-				// write to temp file
+				// 2: write all data to temp file
 				enc := json.NewEncoder(tmpFile)
 				for _, kv := range buckets[i] {
 					err := enc.Encode(&kv)
 					if err != nil {
+						// error handling: if anything went wrong, close and delete temp file
 						tmpFile.Close()
 						os.Remove(tmpFileName)
 						log.Fatalf("cannot encode kv pair %v", kv)
 					}
 				}
+				// close temp file before renaming
 				tmpFile.Close()
 
-				// atomic rename
+				// 3: atomic rename
 				finalFilename := fmt.Sprintf("mr-%d-%d", reply.TaskID, i)
 				err = os.Rename(tmpFileName, finalFilename)
 				if err != nil {
