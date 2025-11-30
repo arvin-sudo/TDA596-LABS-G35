@@ -1,11 +1,14 @@
 package mr
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"io"
 	"log"
+	"net"
+	"net/http"
 	"net/rpc"
 	"os"
 	"sort"
@@ -13,6 +16,7 @@ import (
 )
 
 var myWorkerAddress string
+var workerID int
 
 const (
 	// Maximum number of map tasks to try when discovering intermediate files
@@ -28,6 +32,8 @@ type KeyValue struct {
 	Value string
 }
 
+type WorkerRPCHandler struct{}
+
 // use ihash(key) % NReduce to choose the reduce
 // task number for each KeyValue emitted by Map.
 func ihash(key string) int {
@@ -37,11 +43,26 @@ func ihash(key string) int {
 }
 
 // main/mrworker.go calls this function.
-func Worker(mapf func(string, string) []KeyValue,
-	reducef func(string, []string) string) {
+func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string) string) {
 
 	// Your worker implementation here.
 
+	// ONLY start RPC server in advanced distributed mode
+	if myWorkerAddress != "" {
+		startWorkerRPCServer(myWorkerAddress)
+		fmt.Printf("Worker: Started RPC server at %s\n", myWorkerAddress)
+
+		// register worker with coordinator
+		args := RegisterWorkerArgs{
+			WorkerAddress: myWorkerAddress,
+		}
+		reply := RegisterWorkerReply{}
+		call("Coordinator.RegisterWorker", &args, &reply)
+		workerID = reply.WorkerID
+	} else {
+		fmt.Println("Worker: Running in basic mode, no RPC server started")
+		workerID = 0 // default worker ID in basic mode
+	}
 	// worker loop - keep requesting tasks from coordinator until we are done
 	for {
 		// ask coordinator for a task
@@ -123,6 +144,7 @@ func Worker(mapf func(string, string) []KeyValue,
 			completeArgs := TaskCompleteArgs{
 				TaskID:   reply.TaskID,
 				TaskType: "Map",
+				WorkerID: workerID,
 			}
 			completeReply := TaskCompleteReply{}
 			ok = call("Coordinator.TaskComplete", &completeArgs, &completeReply)
@@ -141,17 +163,52 @@ func Worker(mapf func(string, string) []KeyValue,
 			intermediate := []KeyValue{}
 
 			// we dont know how many map tasks there were, so we try reading until we cant find more files
+			// BACKWARDS COMPATIBLE: try local file first, then RPC fetch from remote worker
 			for mapTaskNum := 0; mapTaskNum < maxMapTasks; mapTaskNum++ {
 				filename := fmt.Sprintf("mr-%d-%d", mapTaskNum, reply.TaskID)
 
-				file, err := os.Open(filename)
+				// TRY LOCAL FILE FIRST (basic mode)
+				content, err := os.ReadFile(filename)
+
 				if err != nil {
-					// assume no more files to read
-					break
+					// Local file not found
+					// FALLBACK: Try RPC fetch from remote worker (distributed mode)
+					if myWorkerAddress != "" {
+						// Ask coordinator: which worker completed this map task?
+						getWorkerArgs := GetMapWorkerArgs{MapTaskID: mapTaskNum}
+						getWorkerReply := GetMapWorkerReply{}
+
+						ok := call("Coordinator.GetMapWorker", &getWorkerArgs, &getWorkerReply)
+						if !ok || !getWorkerReply.Found {
+							// No worker has this map task, assume no more map tasks
+							break
+						}
+
+						// RPC to that worker to fetch the intermediate file
+						fetchArgs := FetchIntermediateFileArgs{
+							MapTaskID:    mapTaskNum,
+							ReduceTaskID: reply.TaskID,
+						}
+						fetchReply := FetchIntermediateFileReply{}
+
+						ok = callWorker(getWorkerReply.WorkerAddr, "WorkerRPCHandler.FetchIntermediateFile", &fetchArgs, &fetchReply)
+						if !ok || !fetchReply.Found {
+							fmt.Printf("Worker: Failed to fetch intermediate file from worker at %s for map task %d\n",
+								getWorkerReply.WorkerAddr, mapTaskNum)
+							break
+						}
+
+						content = fetchReply.Content
+						fmt.Printf("Worker: Fetched intermediate file for map task %d from worker at %s\n",
+							mapTaskNum, getWorkerReply.WorkerAddr)
+					} else {
+						// Basic mode and file not found, assume no more files
+						break
+					}
 				}
 
-				// read all key-value pairs from this file
-				dec := json.NewDecoder(file)
+				// Decode key-value pairs from content (either local or remote)
+				dec := json.NewDecoder(bytes.NewReader(content))
 				for {
 					var kv KeyValue
 					if err := dec.Decode(&kv); err != nil {
@@ -159,7 +216,6 @@ func Worker(mapf func(string, string) []KeyValue,
 					}
 					intermediate = append(intermediate, kv)
 				}
-				file.Close()
 			}
 
 			// SECOND: sort intermediate key-value pairs by key
@@ -229,6 +285,7 @@ func Worker(mapf func(string, string) []KeyValue,
 			completeArgs := TaskCompleteArgs{
 				TaskID:   reply.TaskID,
 				TaskType: "Reduce",
+				WorkerID: workerID,
 			}
 			completeReply := TaskCompleteReply{}
 			ok = call("Coordinator.TaskComplete", &completeArgs, &completeReply)
@@ -299,6 +356,52 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 	return false
 }
 
+// send an RPC request to another worker, wait for the response.
+// returns true on success, false on failure.
+func callWorker(address string, rpcname string, args interface{}, reply interface{}) bool {
+	c, err := rpc.DialHTTP("tcp", address)
+	if err != nil {
+		fmt.Printf("Worker: Failed to dial worker at %s: %v\n", address, err)
+		return false
+	}
+	defer c.Close()
+
+	err = c.Call(rpcname, args, reply)
+	if err == nil {
+		return true
+	}
+
+	fmt.Printf("Worker: RPC call to %s failed: %v\n", address, err)
+	return false
+}
+
 func init() {
 	myWorkerAddress = os.Getenv("WORKER_ADV")
+}
+
+func startWorkerRPCServer(address string) {
+	rpc.Register(&WorkerRPCHandler{})
+	rpc.HandleHTTP()
+
+	l, err := net.Listen("tcp", address)
+	if err != nil {
+		log.Fatal("Worker RPC server error:", err)
+	}
+
+	fmt.Printf("Worker: RPC server listening at %s\n", address)
+	go http.Serve(l, nil)
+}
+
+func (w *WorkerRPCHandler) FetchIntermediateFile(args *FetchIntermediateFileArgs, reply *FetchIntermediateFileReply) error {
+	filename := fmt.Sprintf("mr-%d-%d", args.MapTaskID, args.ReduceTaskID)
+
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		reply.Found = false
+		return nil
+	}
+
+	reply.Content = content
+	reply.Found = true
+	return nil
 }
