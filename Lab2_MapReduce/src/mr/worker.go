@@ -14,6 +14,14 @@ import (
 
 var myWorkerAddress string
 
+const (
+	// Maximum number of map tasks to try when discovering intermediate files
+	// Prevents infinite loop if file system behaves unexpectedly
+	maxMapTasks = 1000
+	// Sleep duration when waiting for tasks
+	workerSleepDuration = 1 * time.Second
+)
+
 // Map functions return a slice of KeyValue.
 type KeyValue struct {
 	Key   string
@@ -133,7 +141,7 @@ func Worker(mapf func(string, string) []KeyValue,
 			intermediate := []KeyValue{}
 
 			// we dont know how many map tasks there were, so we try reading until we cant find more files
-			for mapTaskNum := 0; ; mapTaskNum++ {
+			for mapTaskNum := 0; mapTaskNum < maxMapTasks; mapTaskNum++ {
 				filename := fmt.Sprintf("mr-%d-%d", mapTaskNum, reply.TaskID)
 
 				file, err := os.Open(filename)
@@ -229,7 +237,7 @@ func Worker(mapf func(string, string) []KeyValue,
 			}
 		} else if reply.TaskType == "Wait" {
 			// no task available, wait and try again
-			time.Sleep(time.Second)
+			time.Sleep(workerSleepDuration)
 		} else if reply.TaskType == "Exit" {
 			// all tasks are done, exit worker
 			fmt.Println("Worker: All tasks done, exiting")

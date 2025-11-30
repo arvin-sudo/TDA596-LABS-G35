@@ -11,6 +11,11 @@ import (
 	"time"
 )
 
+const (
+	// Task timeout - after this duration, assume worker has died and reassign task
+	taskTimeout = 10 * time.Second
+)
+
 type Coordinator struct {
 	// Your definitions here.
 	mutex        sync.Mutex
@@ -81,7 +86,7 @@ func (c *Coordinator) RequestTask(args *RequestTaskArgs, reply *RequestTaskReply
 		for i := range c.mapTasks {
 			if c.mapTasks[i].Status == InProgress {
 				elapsed := time.Since(c.mapTasks[i].StartTime)
-				if elapsed > 10*time.Second {
+				if elapsed > taskTimeout {
 					fmt.Printf("Coordinator: Map task %d timed out after %v, resetting to Idle\n",
 						c.mapTasks[i].ID, elapsed)
 					c.mapTasks[i].Status = Idle
@@ -111,7 +116,7 @@ func (c *Coordinator) RequestTask(args *RequestTaskArgs, reply *RequestTaskReply
 		for i := range c.reduceTasks {
 			if c.reduceTasks[i].Status == InProgress {
 				elapsed := time.Since(c.reduceTasks[i].StartTime)
-				if elapsed > 10*time.Second {
+				if elapsed > taskTimeout {
 					fmt.Printf("Coordinator: Reduce task %d timed out after %v, resetting to Idle\n",
 						c.reduceTasks[i].ID, elapsed)
 					c.reduceTasks[i].Status = Idle
@@ -242,6 +247,14 @@ func (c *Coordinator) Done() bool {
 // main/mrcoordinator.go calls this function.
 // nReduce is the number of reduce tasks to use.
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
+	// Validate input parameters
+	if nReduce <= 0 {
+		log.Fatalf("MakeCoordinator: nReduce must be > 0, got %d", nReduce)
+	}
+	if len(files) == 0 {
+		log.Fatalf("MakeCoordinator: must provide at least one input file")
+	}
+
 	c := Coordinator{}
 
 	// Your code here.
