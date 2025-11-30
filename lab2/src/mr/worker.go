@@ -111,8 +111,8 @@ func DoMapTask(mapf func(string, string) []KeyValue, taskReply *AssignTaskReply)
 	}
 
 	for i := 0; i < reduce; i++ {
-		os.Rename(files[i].Name(), fmt.Sprintf("mr-%d-%d", taskReply.Id, i))
 		files[i].Close()
+		os.Rename(files[i].Name(), fmt.Sprintf("mr-%d-%d", taskReply.Id, i))
 	}
 	return nil
 }
@@ -143,8 +143,9 @@ func DoReduceTask(reducef func(string, []string) string, taskReply *AssignTaskRe
 		}
 	}
 	sort.Sort(ByKey(intermediate))
-	oname := fmt.Sprintf("mr-out-%d", taskReply.Id)
-	ofile, _ := os.Create(oname)
+
+	// create a tmp file and then rename it.
+	f, _ := ioutil.TempFile(".", "mt-tmp-reduce-*")
 	i := 0
 	for i < len(intermediate) {
 		j := i + 1
@@ -158,11 +159,14 @@ func DoReduceTask(reducef func(string, []string) string, taskReply *AssignTaskRe
 		output := reducef(intermediate[i].Key, values)
 
 		// this is the correct format for each line of Reduce output.
-		fmt.Fprintf(ofile, "%v %v\n", intermediate[i].Key, output)
+		fmt.Fprintf(f, "%v %v\n", intermediate[i].Key, output)
 
 		i = j
 	}
-	defer ofile.Close()
+	// once tmp file is written done, rename it
+	f.Close()
+	os.Rename(f.Name(), fmt.Sprintf("mr-out-%d", taskReply.Id))
+
 	return nil
 }
 func AssignTaskRequest() *AssignTaskReply {

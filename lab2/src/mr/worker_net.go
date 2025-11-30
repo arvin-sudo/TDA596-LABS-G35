@@ -25,9 +25,9 @@ var fileServerPort int
 var filePath = "."
 var myIPAddress *string
 
-var coordinatorIP = "172.31.69.101"
+//var coordinatorIP = "172.31.69.101"
 
-//var coordinatorIP = "127.0.0.1"
+var coordinatorIP = "127.0.0.1"
 
 var mutex sync.Mutex
 
@@ -162,8 +162,7 @@ func WorkerHTTP(mapf func(string, string) []KeyValue,
 				}
 			}
 			sort.Sort(ByKey(intermediate))
-			oname := fmt.Sprintf("mr-out-%d", taskReply.Id)
-			ofile, _ := os.Create(oname)
+			f, _ := ioutil.TempFile(".", "mr-tmp-reduce-*")
 			i := 0
 			for i < len(intermediate) {
 				j := i + 1
@@ -177,11 +176,11 @@ func WorkerHTTP(mapf func(string, string) []KeyValue,
 				output := reducef(intermediate[i].Key, values)
 
 				// this is the correct format for each line of Reduce output.
-				fmt.Fprintf(ofile, "%v %v\n", intermediate[i].Key, output)
+				fmt.Fprintf(f, "%v %v\n", intermediate[i].Key, output)
 
 				i = j
 			}
-			ofile.Close()
+			os.Rename(f.Name(), fmt.Sprintf("mr-out-%d", taskReply.Id))
 			TaskDoneRequestHTTP(taskReply)
 		} else if taskReply.TaskType == WaitTask {
 			time.Sleep(1 * time.Second)
