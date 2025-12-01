@@ -24,6 +24,10 @@ const (
 	maxMapTasks = 1000
 	// Sleep duration when waiting for tasks
 	workerSleepDuration = 1 * time.Second
+
+	// coordinator failure detection
+	maxFailedRPCAttempts = 5
+	rpcRetryDelay        = 2 * time.Second
 )
 
 // Map functions return a slice of KeyValue.
@@ -64,6 +68,8 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 		workerID = 0 // default worker ID in basic mode
 	}
 	// worker loop - keep requesting tasks from coordinator until we are done
+	// track number of failed RPC attempts to detect coordinator failure
+	failedRPCAttempts := 0
 	for {
 		// ask coordinator for a task
 		args := RequestTaskArgs{}
@@ -71,9 +77,22 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 
 		ok := call("Coordinator.RequestTask", &args, &reply)
 		if !ok {
-			fmt.Println("Worker: RPC call failed")
-			return
+			failedRPCAttempts++
+			fmt.Printf("Worker: RPC call to request task from coordinator failed (attempt: %d/%d)\n",
+				failedRPCAttempts, maxFailedRPCAttempts)
+			if failedRPCAttempts >= maxFailedRPCAttempts {
+				// assume coordinator is down, exit worker
+				fmt.Println("Worker: COORDINATOR FAILURE DETECTION")
+				fmt.Println("Worker: Coordinator seems to be down, exiting")
+				return
+			}
+			// wait before retrying to call coordinator
+			fmt.Printf("Worker: Waiting %v before retrying...\n", rpcRetryDelay)
+			time.Sleep(rpcRetryDelay)
+			continue
 		}
+		// reset failed RPC attempts counter on successful call
+		failedRPCAttempts = 0
 
 		// check what we got of an task type
 		if reply.TaskType == "Map" {
