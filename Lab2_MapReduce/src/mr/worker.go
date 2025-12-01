@@ -411,7 +411,7 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 func callWorker(address string, rpcname string, args interface{}, reply interface{}) bool {
 	c, err := rpc.DialHTTP("tcp", address)
 	if err != nil {
-		fmt.Printf("Worker: Failed to dial worker at %s: %v\n", address, err)
+		fmt.Printf("Worker %d: Failed to dial worker at %s: %v\n", workerID, address, err)
 		return false
 	}
 	defer c.Close()
@@ -421,7 +421,7 @@ func callWorker(address string, rpcname string, args interface{}, reply interfac
 		return true
 	}
 
-	fmt.Printf("Worker: RPC call to %s failed: %v\n", address, err)
+	fmt.Printf("Worker %d: RPC call to %s failed: %v\n", workerID, address, err)
 	return false
 }
 

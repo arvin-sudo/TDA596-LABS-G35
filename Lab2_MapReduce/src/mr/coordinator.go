@@ -214,19 +214,29 @@ func (c *Coordinator) ReportTaskFailure(args *ReportTaskFailureArgs, reply *Repo
 		args.TaskType, args.TaskID, args.Reason)
 
 	if args.TaskType == "Reduce" && args.FailedMapID >= 0 {
-		// Reduce task failed because it couldnt fetch intermediate file from a map task
-		// Reset the map task 0 to Idle so it can be reassigned to new worker
+		// Reduce task failed because it couldn't fetch intermediate file from a map task
+		// Optimization: Reset ALL map tasks from the dead worker (batch reassignment)
 		if args.FailedMapID < len(c.mapTasks) {
-			mapTask := &c.mapTasks[args.FailedMapID]
-			if mapTask.Status == Completed {
-				fmt.Printf("Coordinator: Map task %d output unavailable (worker may have died), resetting to Idle for reassignment\n", args.FailedMapID)
-				mapTask.Status = Idle
-				mapTask.WorkerID = 0
-				mapTask.WorkerAddress = ""
+			deadWorkerAddr := c.mapTasks[args.FailedMapID].WorkerAddress
+			deadWorkerID := c.mapTasks[args.FailedMapID].WorkerID
+
+			if deadWorkerAddr != "" {
+				// Reset ALL map tasks from this dead worker for efficiency
+				resetCount := 0
+				for i := range c.mapTasks {
+					if c.mapTasks[i].WorkerAddress == deadWorkerAddr && c.mapTasks[i].Status == Completed {
+						c.mapTasks[i].Status = Idle
+						c.mapTasks[i].WorkerID = 0
+						c.mapTasks[i].WorkerAddress = ""
+						resetCount++
+					}
+				}
+				fmt.Printf("Coordinator: Worker %d (at %s) appears dead, reset %d map tasks for batch reassignment\n",
+					deadWorkerID, deadWorkerAddr, resetCount)
 			}
 		}
 
-		// Also reset the reduce task 0 to Idle so it can be retried after map task completes
+		// Also reset the reduce task to Idle so it can be retried after map tasks complete
 		if args.TaskID >= 0 && args.TaskID < len(c.reduceTasks) {
 			reduceTask := &c.reduceTasks[args.TaskID]
 			if reduceTask.Status == InProgress {
