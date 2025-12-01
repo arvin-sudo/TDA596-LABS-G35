@@ -214,14 +214,14 @@ func (c *Coordinator) ReportTaskFailure(args *ReportTaskFailureArgs, reply *Repo
 		args.TaskType, args.TaskID, args.Reason)
 
 	if args.TaskType == "Reduce" && args.FailedMapID >= 0 {
-		// Reduce task failed because it couldn't fetch intermediate file from a map task
-		// Optimization: Reset ALL map tasks from the dead worker (batch reassignment)
+		// Reduce task failed because it couldnt fetch intermediate file from a map task
+		// Optimization: Reset ALL map tasks from the dead worker (batch reassignment) PLEASE WORK
 		if args.FailedMapID < len(c.mapTasks) {
 			deadWorkerAddr := c.mapTasks[args.FailedMapID].WorkerAddress
 			deadWorkerID := c.mapTasks[args.FailedMapID].WorkerID
 
 			if deadWorkerAddr != "" {
-				// Reset ALL map tasks from this dead worker for efficiency
+				// Reset ALL map tasks from this dead worker
 				resetCount := 0
 				for i := range c.mapTasks {
 					if c.mapTasks[i].WorkerAddress == deadWorkerAddr && c.mapTasks[i].Status == Completed {

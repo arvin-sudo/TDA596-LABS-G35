@@ -217,7 +217,7 @@ taskLoop: // Label for jumping back when reduce task fails
 
 						ok = callWorker(getWorkerReply.WorkerAddr, "WorkerRPCHandler.FetchIntermediateFile", &fetchArgs, &fetchReply)
 						if !ok || !fetchReply.Found {
-							fmt.Printf("Worker %d: Failed to fetch intermediate file from worker at %s for map task %d\n",
+							fmt.Printf("Worker %d: Failed to fetch intermediate file from Worker at %s for map task %d\n",
 								workerID, getWorkerReply.WorkerAddr, mapTaskNum)
 
 							// Report to coordinator that we cant fetch this intermediate file
