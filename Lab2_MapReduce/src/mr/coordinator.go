@@ -217,10 +217,24 @@ func (c *Coordinator) Example(args *ExampleArgs, reply *ExampleReply) error {
 func (c *Coordinator) server() {
 	rpc.Register(c)
 	rpc.HandleHTTP()
-	//l, e := net.Listen("tcp", ":1234")
+
 	sockname := coordinatorSock()
-	os.Remove(sockname)
-	l, e := net.Listen("unix", sockname)
+
+	var l net.Listener
+	var e error
+
+	// check if distributed mode advanced (COOR_ADV is set)
+	if os.Getenv("COOR_ADV") != "" {
+		// distributed mode - use TCP socket
+		l, e = net.Listen("tcp", sockname)
+		fmt.Printf("Coordinator: Listening on TCP %s\n", sockname)
+	} else {
+		// basic mode - use UNIX domain socket
+		os.Remove(sockname)
+		l, e = net.Listen("unix", sockname)
+		fmt.Printf("Coordinator: Listening on UNIX socket %s\n", sockname)
+	}
+
 	if e != nil {
 		log.Fatal("listen error:", e)
 	}
