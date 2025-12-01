@@ -68,9 +68,11 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 		fmt.Println("Worker [starting]: Running in basic mode, no RPC server started")
 		workerID = 1
 	}
+
 	// worker loop - keep requesting tasks from coordinator until we are done
 	// track number of failed RPC attempts to detect coordinator failure
 	failedRPCAttempts := 0
+taskLoop: // Label for jumping back when reduce task fails
 	for {
 		// ask coordinator for a task
 		args := RequestTaskArgs{}
@@ -217,7 +219,23 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 						if !ok || !fetchReply.Found {
 							fmt.Printf("Worker %d: Failed to fetch intermediate file from worker at %s for map task %d\n",
 								workerID, getWorkerReply.WorkerAddr, mapTaskNum)
-							break
+
+							// Report to coordinator that we cant fetch this intermediate file
+							// This allows coordinator to immediately reassign the map task instead of waiting for timeout
+							failureArgs := ReportTaskFailureArgs{
+								TaskID:      reply.TaskID,
+								TaskType:    "Reduce",
+								Reason:      fmt.Sprintf("Cannot fetch intermediate file from map task %d (worker may have died)", mapTaskNum),
+								FailedMapID: mapTaskNum,
+							}
+							failureReply := ReportTaskFailureReply{}
+							call("Coordinator.ReportTaskFailure", &failureArgs, &failureReply)
+
+							fmt.Printf("Worker %d: Aborting reduce task %d due to missing intermediate file, coordinator will reassign\n",
+								workerID, reply.TaskID)
+
+							// Skip to next task request (dont report this reduceTask as complete)
+							goto taskLoop // Jump back to main task request loop
 						}
 
 						content = fetchReply.Content

@@ -82,6 +82,18 @@ type FetchIntermediateFileReply struct {
 	Found   bool
 }
 
+// ReportTaskFailure - worker reports that a task failed (e.g., can't fetch intermediate files)
+type ReportTaskFailureArgs struct {
+	TaskID      int
+	TaskType    string // "Map" or "Reduce"
+	Reason      string // Description of failure
+	FailedMapID int    // For reduce tasks: which map task's file couldn't be fetched (-1 if not applicable)
+}
+
+type ReportTaskFailureReply struct {
+	Acknowledged bool
+}
+
 // Cook up a unique-ish UNIX-domain socket name
 // in /var/tmp, for the coordinator.
 // Can't use the current directory since

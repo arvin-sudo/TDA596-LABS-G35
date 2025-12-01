@@ -205,6 +205,41 @@ func (c *Coordinator) GetMapWorker(args *GetMapWorkerArgs, reply *GetMapWorkerRe
 	return nil
 }
 
+// ReportTaskFailure - worker reports that a task failed
+func (c *Coordinator) ReportTaskFailure(args *ReportTaskFailureArgs, reply *ReportTaskFailureReply) error {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	fmt.Printf("Coordinator: Received task failure report: %s task %d, reason: %s\n",
+		args.TaskType, args.TaskID, args.Reason)
+
+	if args.TaskType == "Reduce" && args.FailedMapID >= 0 {
+		// Reduce task failed because it couldnt fetch intermediate file from a map task
+		// Reset the map task 0 to Idle so it can be reassigned to new worker
+		if args.FailedMapID < len(c.mapTasks) {
+			mapTask := &c.mapTasks[args.FailedMapID]
+			if mapTask.Status == Completed {
+				fmt.Printf("Coordinator: Map task %d output unavailable (worker may have died), resetting to Idle for reassignment\n", args.FailedMapID)
+				mapTask.Status = Idle
+				mapTask.WorkerID = 0
+				mapTask.WorkerAddress = ""
+			}
+		}
+
+		// Also reset the reduce task 0 to Idle so it can be retried after map task completes
+		if args.TaskID >= 0 && args.TaskID < len(c.reduceTasks) {
+			reduceTask := &c.reduceTasks[args.TaskID]
+			if reduceTask.Status == InProgress {
+				fmt.Printf("Coordinator: Resetting reduce task %d to Idle for retry\n", args.TaskID)
+				reduceTask.Status = Idle
+			}
+		}
+	}
+
+	reply.Acknowledged = true
+	return nil
+}
+
 // an example RPC handler.
 //
 // the RPC argument and reply types are defined in rpc.go.
