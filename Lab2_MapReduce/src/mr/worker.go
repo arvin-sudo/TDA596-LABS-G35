@@ -54,7 +54,7 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 	// ONLY start RPC server in advanced distributed mode
 	if myWorkerAddress != "" {
 		startWorkerRPCServer(myWorkerAddress)
-		fmt.Printf("Worker: Started RPC server at %s\n", myWorkerAddress)
+		fmt.Printf("Worker [starting]: Started RPC server at %s\n", myWorkerAddress)
 
 		// register worker with coordinator
 		args := RegisterWorkerArgs{
@@ -63,9 +63,10 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 		reply := RegisterWorkerReply{}
 		call("Coordinator.RegisterWorker", &args, &reply)
 		workerID = reply.WorkerID
+		fmt.Printf("Worker %d: Registered with coordinator\n", workerID)
 	} else {
-		fmt.Println("Worker: Running in basic mode, no RPC server started")
-		workerID = 0 // default worker ID in basic mode
+		fmt.Println("Worker [starting]: Running in basic mode, no RPC server started")
+		workerID = 1
 	}
 	// worker loop - keep requesting tasks from coordinator until we are done
 	// track number of failed RPC attempts to detect coordinator failure
@@ -78,16 +79,16 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 		ok := call("Coordinator.RequestTask", &args, &reply)
 		if !ok {
 			failedRPCAttempts++
-			fmt.Printf("Worker: RPC call to request task from coordinator failed (attempt: %d/%d)\n",
-				failedRPCAttempts, maxFailedRPCAttempts)
+			fmt.Printf("Worker %d: RPC call to request task from coordinator failed (attempt: %d/%d)\n",
+				workerID, failedRPCAttempts, maxFailedRPCAttempts)
 			if failedRPCAttempts >= maxFailedRPCAttempts {
 				// assume coordinator is down, exit worker
-				fmt.Println("Worker: COORDINATOR FAILURE DETECTION")
-				fmt.Println("Worker: Coordinator seems to be down, exiting")
+				fmt.Printf("Worker %d: COORDINATOR FAILURE DETECTION\n", workerID)
+				fmt.Printf("Worker %d: Coordinator seems to be down, exiting\n", workerID)
 				return
 			}
 			// wait before retrying to call coordinator
-			fmt.Printf("Worker: Waiting %v before retrying...\n", rpcRetryDelay)
+			fmt.Printf("Worker %d: Waiting %v before retrying...\n", workerID, rpcRetryDelay)
 			time.Sleep(rpcRetryDelay)
 			continue
 		}
@@ -97,7 +98,7 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 		// check what we got of an task type
 		if reply.TaskType == "Map" {
 			// perform map task
-			fmt.Printf("Worker: Received Map task %d for file: '%s'\n", reply.TaskID, reply.Filename)
+			fmt.Printf("Worker %d: Received Map task %d for file: '%s'\n", workerID, reply.TaskID, reply.Filename)
 
 			// read input file
 			file, err := os.Open(reply.Filename)
@@ -112,8 +113,8 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 
 			// run map function
 			kva := mapf(reply.Filename, string(content))
-			fmt.Printf("Worker: Map task %d produced %v key-value pairs from file: '%s'\n",
-				reply.TaskID, len(kva), reply.Filename)
+			fmt.Printf("Worker %d: Map task %d produced %v key-value pairs from file: '%s'\n",
+				workerID, reply.TaskID, len(kva), reply.Filename)
 
 			// create buckets for each reduce task
 			buckets := make([][]KeyValue, reply.NReduce)
@@ -158,8 +159,8 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 				}
 			}
 
-			fmt.Printf("Worker: Wrote %d intermediate files for task %d\n",
-				reply.NReduce, reply.TaskID)
+			fmt.Printf("Worker %d: Wrote %d intermediate files for map task %d\n",
+				workerID, reply.NReduce, reply.TaskID)
 
 			// report task completion to coordinator
 			completeArgs := TaskCompleteArgs{
@@ -170,11 +171,11 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 			completeReply := TaskCompleteReply{}
 			ok = call("Coordinator.TaskComplete", &completeArgs, &completeReply)
 			if !ok {
-				fmt.Printf("Worker: Failed to report task %d completion\n", reply.TaskID)
+				fmt.Printf("Worker %d: Failed to report map task %d completion\n", workerID, reply.TaskID)
 			}
 		} else if reply.TaskType == "Reduce" {
 			// perform reduce task
-			fmt.Printf("Worker: Received Reduce task %d\n", reply.TaskID)
+			fmt.Printf("Worker %d: Received Reduce task %d\n", workerID, reply.TaskID)
 
 			// FIRST: gather intermediate key-value pairs for this reduce task
 			// read all intermediate files thats named mr-*-<reply.TaskID>
@@ -214,14 +215,14 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 
 						ok = callWorker(getWorkerReply.WorkerAddr, "WorkerRPCHandler.FetchIntermediateFile", &fetchArgs, &fetchReply)
 						if !ok || !fetchReply.Found {
-							fmt.Printf("Worker: Failed to fetch intermediate file from worker at %s for map task %d\n",
-								getWorkerReply.WorkerAddr, mapTaskNum)
+							fmt.Printf("Worker %d: Failed to fetch intermediate file from worker at %s for map task %d\n",
+								workerID, getWorkerReply.WorkerAddr, mapTaskNum)
 							break
 						}
 
 						content = fetchReply.Content
-						fmt.Printf("Worker: Fetched intermediate file for map task %d from worker at %s\n",
-							mapTaskNum, getWorkerReply.WorkerAddr)
+						fmt.Printf("Worker %d: Fetched intermediate file for map task %d from worker at %s\n",
+							workerID, mapTaskNum, getWorkerReply.WorkerAddr)
 					} else {
 						// Basic mode and file not found, assume no more files
 						break
@@ -299,8 +300,8 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 				log.Fatalf("cannot rename %v to %v", tmpFileName, outputFilename)
 			}
 
-			fmt.Printf("Worker: Reduce task %d wrote output file: '%s'\n",
-				reply.TaskID, outputFilename)
+			fmt.Printf("Worker %d: Reduce task %d wrote output file: '%s'\n",
+				workerID, reply.TaskID, outputFilename)
 
 			// FIFTH: report task completion to coordinator
 			completeArgs := TaskCompleteArgs{
@@ -311,14 +312,14 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 			completeReply := TaskCompleteReply{}
 			ok = call("Coordinator.TaskComplete", &completeArgs, &completeReply)
 			if !ok {
-				fmt.Printf("Worker: Failed to report task %d completion\n", reply.TaskID)
+				fmt.Printf("Worker %d: Failed to report reduce task %d completion\n", workerID, reply.TaskID)
 			}
 		} else if reply.TaskType == "Wait" {
 			// no task available, wait and try again
 			time.Sleep(workerSleepDuration)
 		} else if reply.TaskType == "Exit" {
 			// all tasks are done, exit worker
-			fmt.Println("Worker: All tasks done, exiting")
+			fmt.Printf("Worker %d: All tasks done, exiting\n", workerID)
 			return
 		}
 
@@ -373,7 +374,8 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 		c, err = rpc.DialHTTP("unix", sockname)
 	}
 	if err != nil {
-		log.Fatal("dialing:", err)
+		fmt.Printf("Worker %d: Failed to connect to coordinator: %v\n", workerID, err)
+		return false // retry
 	}
 	defer c.Close()
 

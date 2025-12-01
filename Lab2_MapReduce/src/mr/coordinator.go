@@ -274,7 +274,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	// Your code here.
 	c.nReduce = nReduce
 	c.workers = make(map[int]string)
-	c.nextWorkerID = 0
+	c.nextWorkerID = 1
 
 	// create a map task for each input file
 	c.mapTasks = make([]MapTask, len(files))
