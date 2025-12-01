@@ -63,8 +63,8 @@ type Task struct {
 // -----------------RPC handlers for the worker to call.------------------
 func (c *Coordinator) AssignTask(args *AssignTaskArgs, reply *AssignTaskReply) error {
 	c.mutex.Lock()
+	defer c.mutex.Unlock()
 	coordinatorPhase := c.coordinatorPhase
-	c.mutex.Unlock()
 	if coordinatorPhase == OngoingMap {
 		err := c.assignMapTask(args, reply)
 		if err != nil {
@@ -122,10 +122,10 @@ func (c *Coordinator) server() {
 // if the entire job has finished.
 func (c *Coordinator) Done() bool {
 	ret := false
-
 	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
 	coordinatorPhase := c.coordinatorPhase
-	c.mutex.Unlock()
 	if coordinatorPhase == AllDone {
 		return true
 	}
@@ -203,9 +203,7 @@ func (c *Coordinator) assignMapTask(args *AssignTaskArgs, reply *AssignTaskReply
 	reply.Id = 0
 	reply.TaskType = WaitTask
 
-	c.mutex.Lock()
 	c.coordinatorPhase = WaitingMapFinish
-	c.mutex.Unlock()
 	return nil
 }
 
@@ -228,9 +226,7 @@ func (c *Coordinator) assignReduceTask(args *AssignTaskArgs, reply *AssignTaskRe
 	reply.Id = 0
 	reply.TaskType = WaitTask
 
-	c.mutex.Lock()
 	c.coordinatorPhase = WaitingReduceFinish
-	c.mutex.Unlock()
 	return nil
 }
 
@@ -256,13 +252,9 @@ func (c *Coordinator) waitingMapFinish(args *AssignTaskArgs, reply *AssignTaskRe
 	}
 
 	if needToWait {
-		c.mutex.Lock()
 		c.coordinatorPhase = WaitingMapFinish
-		c.mutex.Unlock()
 	} else {
-		c.mutex.Lock()
 		c.coordinatorPhase = OngoingReduce
-		c.mutex.Unlock()
 	}
 
 	reply.Id = 0
@@ -292,15 +284,11 @@ func (c *Coordinator) waitingReduceFinish(args *AssignTaskArgs, reply *AssignTas
 	}
 
 	if needToWait {
-		c.mutex.Lock()
 		c.coordinatorPhase = WaitingReduceFinish
-		c.mutex.Unlock()
 		reply.Id = 0
 		reply.TaskType = WaitTask
 	} else {
-		c.mutex.Lock()
 		c.coordinatorPhase = AllDone
-		c.mutex.Unlock()
 		reply.Id = 0
 		reply.TaskType = ExitTask
 	}

@@ -23,8 +23,10 @@ type CoordinatorNet struct {
 // -----------------RPC handlers for the worker to call.------------------
 func (c *CoordinatorNet) AssignTaskHTTP(args *AssignTaskArgs, reply *AssignTaskReplyHTTP) error {
 	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
 	coordinatorPhase := c.coordinatorPhase
-	c.mutex.Unlock()
+
 	if coordinatorPhase == OngoingMap {
 		basicTaskReply := &AssignTaskReply{}
 		err := c.assignMapTask(args, basicTaskReply)
