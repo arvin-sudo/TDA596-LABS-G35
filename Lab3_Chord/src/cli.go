@@ -9,8 +9,8 @@ import (
 )
 
 type Config struct {
-	IP string
-	PORT    int
+	IP   string
+	PORT int
 }
 
 func ParseArgs() *Config {
