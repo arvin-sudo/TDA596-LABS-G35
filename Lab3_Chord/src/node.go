@@ -54,3 +54,10 @@ func (n *Node) PrintInfo() {
 	fmt.Printf("IP-Address: %s\n", n.IP)
 	fmt.Printf("== END ==\n")
 }
+
+// ping - rpc method to check if node is alive
+func (n *Node) Ping(args *EmptyArgs, reply *PingReply) error {
+	reply.NodeID = IDToString(n.ID)
+	reply.NodeIP = n.IP
+	return nil
+}
