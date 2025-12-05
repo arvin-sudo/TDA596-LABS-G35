@@ -14,8 +14,7 @@ func main() {
 	fmt.Printf("IP-Address: %s\n", config.IP)
 	fmt.Printf("Port: %d\n", config.PORT)
 
-	// Test hash func
-	address := fmt.Sprintf("%s:%d", config.IP, config.PORT)
-	id := Hash(address)
-	fmt.Printf("Node ID: %s\n", IDToString(id))
+	// create node
+	node := NewNode(config.IP, config.PORT)
+	node.PrintInfo()
 }
