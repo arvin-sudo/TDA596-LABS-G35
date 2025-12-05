@@ -7,7 +7,7 @@ import (
 )
 
 func main() {
-	fmt.Println("Chord node starting..")
+	fmt.Println("Chord node starting..n")
 
 	config := ParseArgs()
 
@@ -21,6 +21,10 @@ func main() {
 		fmt.Printf("Error starting RPC-Server: %v\n", err)
 		return
 	}
+
+	// create new chord ring
+	node.Create()
+	node.PrintInfo()
 
 	// keep running or program exits
 	fmt.Println("Node running. Ctrl+C to stop")

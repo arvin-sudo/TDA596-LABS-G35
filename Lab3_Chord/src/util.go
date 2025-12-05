@@ -3,9 +3,10 @@
 package main
 
 import (
+	"crypto/sha1"
 	"fmt"
 	"math/big"
-	"crypto/sha1"
+	"net/rpc"
 )
 
 /*
@@ -27,4 +28,16 @@ func Hash(key string) *big.Int {
 // helper: convert big.Int to hex string for printing
 func IDToString(id * big.Int) string {
 	return fmt.Sprintf("%x", id)
+}
+
+// Call RPC method on another node to verify they communicate
+func CallNode(ip string, method string, args interface{}, reply interface{}) error {
+	client, err := rpc.DialHTTP("tcp", ip)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+
+	err = client.Call(method, args, reply)
+	return err
 }
