@@ -2,6 +2,10 @@
 
 package main
 
+import (
+	"math/big"
+)
+
 // RPC argument/reply structs will go here later
 // (e.g., FindSuccessorArgs, NotifyArgs, etc.)
 
@@ -15,4 +19,13 @@ type EmptyReply struct{}
 type PingReply struct {
 	NodeID string
 	NodeIP string
+}
+
+// FindSuccessor args and reply
+type FindSuccessorArgs struct {
+	ID *big.Int
+}
+
+type FindSuccessorReply struct {
+	Node *NodeInfo // the successor node
 }

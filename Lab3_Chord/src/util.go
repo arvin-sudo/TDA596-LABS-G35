@@ -26,7 +26,7 @@ func Hash(key string) *big.Int {
 }
 
 // helper: convert big.Int to hex string for printing
-func IDToString(id * big.Int) string {
+func IDToString(id *big.Int) string {
 	return fmt.Sprintf("%x", id)
 }
 
@@ -40,4 +40,26 @@ func CallNode(ip string, method string, args interface{}, reply interface{}) err
 
 	err = client.Call(method, args, reply)
 	return err
+}
+
+// check if ID is in range (start, end] on the chord ring
+// if start == end, the range is the full ring
+func InRange(id, start, end *big.Int) bool {
+	// Case 1: Same node (alone ring)
+	// special case: if start == end, only true if ID == start
+	if start.Cmp(end) == 0 {
+		return id.Cmp(start) == 0
+	}
+
+	// Case 2:
+	// normal case: start < end (no wraparound)
+	if start.Cmp(end) < 0 {
+		// ID should be: start < ID AND ID <= end
+		return start.Cmp(id) < 0 && id.Cmp(end) <= 0
+	}
+
+	// Case 3:
+	// wraparound case: start > end (wraps around 0)
+	// ID is in range if: ID > start OR ID <= end
+	return id.Cmp(start) > 0 || id.Cmp(end) <= 0
 }

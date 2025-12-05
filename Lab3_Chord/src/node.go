@@ -12,13 +12,13 @@ import (
 
 // Local Node
 type Node struct {
-	ID *big.Int
-	IP string // IP:PORT Address
+	ID        *big.Int
+	IP        string    // IP:PORT Address
 	Successor *NodeInfo // next node in ring
 }
 
 // NodeInfo = information about a remote node
-type NodeInfo struct{
+type NodeInfo struct {
 	ID *big.Int
 	IP string // IP:PORT Address of remote Node
 }
@@ -28,8 +28,8 @@ func NewNode(ip string, port int) *Node {
 	ipAddress := fmt.Sprintf("%s:%d", ip, port)
 
 	node := &Node{
-		ID: Hash(ipAddress),
-		IP: ipAddress,
+		ID:        Hash(ipAddress),
+		IP:        ipAddress,
 		Successor: nil,
 	}
 
@@ -88,4 +88,33 @@ func (n *Node) Create() {
 		IP: n.IP,
 	}
 	fmt.Println("Created new Chord Ring")
+}
+
+// FindSuccessor - RPC method to find the successor node of an ID
+func (n *Node) FindSuccessor(args *FindSuccessorArgs, reply *FindSuccessorReply) error {
+	id := args.ID
+
+	if InRange(id, n.ID, n.Successor.ID) {
+		reply.Node = n.Successor
+		return nil
+	}
+
+	reply.Node = n.Successor
+	return nil
+}
+
+// join an existing chord ring
+func (n *Node) Join(bootstrapNode string) error {
+	var reply FindSuccessorReply
+	err := CallNode(bootstrapNode, "Node.FindSuccessor", &FindSuccessorArgs{ID: n.ID}, &reply)
+	if err != nil {
+		return fmt.Errorf("Failed to contact bootstrap node: %v", err)
+	}
+
+	n.Successor = reply.Node
+
+	fmt.Printf("Joined Chord Ring by Node: %s\n", bootstrapNode)
+	fmt.Printf("My successor's IP-Adress is: %s\n", n.Successor.IP)
+
+	return nil
 }

@@ -22,8 +22,20 @@ func main() {
 		return
 	}
 
-	// create new chord ring
-	node.Create()
+	// create new or join chord ring based on config
+	if config.JoinIP == "" {
+		// no join address = create new ring
+		node.Create()
+	} else {
+		// join existing ring
+		joinRing := fmt.Sprintf("%s:%d", config.JoinIP, config.JoinPORT)
+		err := node.Join(joinRing)
+		if err != nil {
+			fmt.Printf("Error joining ring: %v\n", err)
+			return
+		}
+	}
+
 	node.PrintInfo()
 
 	// keep running or program exits
