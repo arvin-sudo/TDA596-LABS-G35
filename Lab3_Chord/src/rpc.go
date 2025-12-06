@@ -6,9 +6,6 @@ import (
 	"math/big"
 )
 
-// RPC argument/reply structs will go here later
-// (e.g., FindSuccessorArgs, NotifyArgs, etc.)
-
 // Empty args (used when no input needed)
 type EmptyArgs struct{}
 
@@ -28,4 +25,14 @@ type FindSuccessorArgs struct {
 
 type FindSuccessorReply struct {
 	Node *NodeInfo // the successor node
+}
+
+// Predecessor - ask a node who its predecessor is
+type GetPredecessorReply struct {
+	Predecessor *NodeInfo
+}
+
+// Notify args - tell a node it might be our predecessor
+type NotifyArgs struct {
+	Node *NodeInfo
 }

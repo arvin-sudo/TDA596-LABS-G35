@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"time"
 )
 
 func main() {
@@ -37,6 +38,20 @@ func main() {
 	}
 
 	node.PrintInfo()
+
+	// start goroutine stabilization in background
+	go func() {
+		// create timer that ticks every 3 seconds
+		ticker := time.NewTicker(3 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			// wait on next tick
+			<-ticker.C
+			// run stabilize when ticks
+			node.Stabilize()
+		}
+	}()
 
 	// keep running or program exits
 	fmt.Println("Node running. Ctrl+C to stop")
