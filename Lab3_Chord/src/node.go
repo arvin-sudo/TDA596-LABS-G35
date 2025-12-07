@@ -53,7 +53,7 @@ func (n *Node) StartRPCServer() error {
 		return err
 	}
 
-	fmt.Printf("RPC server listening on %s\n", n.IP)
+	fmt.Printf("RPC Server listening on IP: %s\n", n.IP)
 
 	// Start serving (in goroutine so it doesn't block)
 	go http.Serve(listener, nil)

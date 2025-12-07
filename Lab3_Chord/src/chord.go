@@ -8,7 +8,7 @@ import (
 )
 
 func main() {
-	fmt.Println("Chord node starting..")
+	fmt.Println("Chord Node Starting..")
 
 	config := ParseArgs()
 
