@@ -8,13 +8,13 @@ import (
 )
 
 func main() {
-	fmt.Println("Chord node starting..n")
+	fmt.Println("Chord node starting..")
 
 	config := ParseArgs()
 
 	// create node
 	node := NewNode(config.IP, config.PORT)
-	node.PrintInfo()
+	node.PrintState()
 
 	// start RPC server
 	err := node.StartRPCServer()
@@ -37,7 +37,7 @@ func main() {
 		}
 	}
 
-	node.PrintInfo()
+	node.PrintState()
 
 	// start goroutine stabilization in background
 	go func() {
@@ -53,7 +53,14 @@ func main() {
 		}
 	}()
 
-	// keep running or program exits
-	fmt.Println("Node running. Ctrl+C to stop")
-	select {} // block forever
+	// command loop - read commands from user
+	fmt.Println("--- Node Running... ---")
+	fmt.Println("Available Commands:")
+	fmt.Println(">	Lookup <key>")
+	fmt.Println(">	PrintState")
+	fmt.Println(">	Help")
+	fmt.Println(">	Exit")
+	fmt.Println()
+
+	node.CommandLoop()
 }
