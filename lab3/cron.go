@@ -1,6 +1,23 @@
 package lab3
 
-import "math"
+import (
+	"math"
+	"time"
+)
+
+func (c *Chord) runBackground(task func(), interval time.Duration) {
+	go func() {
+		task()
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				task()
+			}
+		}
+	}()
+}
 
 // periodic call stabilize(--ts), fix fingers(--tff) and check predecessor(--tcp)
 func (c *Chord) stabilize() {

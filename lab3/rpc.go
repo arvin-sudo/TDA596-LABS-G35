@@ -28,7 +28,7 @@ func (c *Chord) findSuccessor(id int64) (bool, *Chord) {
 	}
 }
 
-func (n *Chord) ping() error {
+func (c *Chord) ping() error {
 	return nil
 }
 
