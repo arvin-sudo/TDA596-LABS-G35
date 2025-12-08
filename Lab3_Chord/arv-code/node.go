@@ -16,9 +16,9 @@ import (
 // Local Node
 type Node struct {
 	ID          *big.Int
-	IP          string    // IP:PORT Address
-	Successor   *NodeInfo // next node in ring
-	Predecessor *NodeInfo // previous node in ring
+	IP          string      // IP:PORT Address
+	Successor   []*NodeInfo // list of nodes in ring
+	Predecessor *NodeInfo   // previous node in ring
 }
 
 // NodeInfo = information about a remote node
@@ -101,9 +101,11 @@ func (n *Node) Ping(args *EmptyArgs, reply *PingReply) error {
 // create a new chord ring (one alone node)
 func (n *Node) Create() {
 	// in a ring with only one node, we are our own successor
-	n.Successor = &NodeInfo{
-		ID: n.ID,
-		IP: n.IP,
+	n.Successor = []*NodeInfo{
+		{
+			ID: n.ID,
+			IP: n.IP,
+		},
 	}
 	fmt.Println("NEW CHORD RING CREATED")
 }
