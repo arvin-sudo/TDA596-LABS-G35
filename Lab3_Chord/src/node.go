@@ -101,7 +101,7 @@ func (n *Node) PrintState() {
 	}
 
 	// fingerTable info
-	fmt.Println("\n------- FINGER TABLE --------")
+	fmt.Println("\n------- FINGER TABLE -------")
 	if n.FingerTable[1] != nil {
 		fmt.Printf("Finger[1]: %s\n", n.FingerTable[1].IP)
 	} else {
@@ -367,6 +367,12 @@ func (n *Node) Stabilize() {
 // interactive commandloop for user input
 func (n *Node) CommandLoop() {
 	scanner := bufio.NewScanner(os.Stdin)
+	fmt.Println("Available Commands:")
+	fmt.Println(">	Lookup <key>")
+	fmt.Println(">	PrintState")
+	fmt.Println(">	Help")
+	fmt.Println(">	Exit")
+	fmt.Println()
 
 	for {
 		fmt.Print("> ")

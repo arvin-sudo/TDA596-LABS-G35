@@ -71,12 +71,5 @@ func main() {
 
 	// command loop - read commands from user
 	fmt.Println("--- Node Running... ---")
-	fmt.Println("Available Commands:")
-	fmt.Println(">	Lookup <key>")
-	fmt.Println(">	PrintState")
-	fmt.Println(">	Help")
-	fmt.Println(">	Exit")
-	fmt.Println()
-
 	node.CommandLoop()
 }
