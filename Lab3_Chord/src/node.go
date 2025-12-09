@@ -110,6 +110,31 @@ func (n *Node) Ping(args *EmptyArgs, reply *PingReply) error {
 	return nil
 }
 
+// PUT - rpc method to store data
+// RACE CONDITION - NEEDS FIXING MUTEX
+func (n *Node) Put(args *PutArgs, reply *PutReply) error {
+	n.Bucket[args.Key] = args.Value
+	fmt.Printf("PUT: Stored [%s]\n", args.Key)
+	return nil
+}
+
+// GET - rpc method to fetch data content
+func (n *Node) Get(args *GetArgs, reply *GetReply) error {
+	value, exists := n.Bucket[args.Key]
+
+	if !exists {
+		reply.Value = ""
+		reply.Found = false
+		fmt.Printf("GET: Not found [%s]\n", args.Key)
+	} else {
+		reply.Value = value
+		reply.Found = true
+		fmt.Printf("GET: Found [%s]\n", args.Key)
+	}
+
+	return nil
+}
+
 // create a new chord ring (one alone node)
 func (n *Node) Create() {
 	// in a ring with only one node, we are our own successor

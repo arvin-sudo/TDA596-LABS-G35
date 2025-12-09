@@ -36,3 +36,21 @@ type GetPredecessorReply struct {
 type NotifyArgs struct {
 	Node *NodeInfo
 }
+
+// PUT - store data - store a key-value pair
+type PutArgs struct {
+	Key   string // data id
+	Value string // data content
+}
+
+type PutReply struct{}
+
+// GET - fetch data - retrieve a value for a key
+type GetArgs struct {
+	Key string // data id
+}
+
+type GetReply struct {
+	Value string // data content
+	Found bool   // data exists?
+}
