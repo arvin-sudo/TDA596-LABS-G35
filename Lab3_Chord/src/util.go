@@ -9,6 +9,11 @@ import (
 	"net/rpc"
 )
 
+// fingerTable
+const (
+	KeySize = sha1.Size * 8 // 160bits
+)
+
 /*
  In Chord each node as a unique ID (160-bit number from SHA-1).
  Create this ID by hashing the nodes IP:PORT

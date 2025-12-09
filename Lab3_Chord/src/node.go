@@ -19,6 +19,7 @@ type Node struct {
 	Successor   []*NodeInfo       // list of nodes in ring
 	Predecessor *NodeInfo         // previous node in ring
 	Bucket      map[string]string // Data-storage
+	FingerTable []*NodeInfo       // make Chord Lookup faster from O(N) to O(Log n)
 }
 
 // NodeInfo = information about a remote node
@@ -37,6 +38,7 @@ func NewNode(ip string, port int) *Node {
 		Successor:   nil,
 		Predecessor: nil,
 		Bucket:      make(map[string]string),
+		FingerTable: make([]*NodeInfo, KeySize+1),
 	}
 
 	return node
@@ -87,6 +89,11 @@ func (n *Node) PrintState() {
 	} else {
 		fmt.Printf("Predecessor Node: None\n")
 	}
+
+	// fingerTable info
+	fmt.Println("\n------- FINGER TABLE --------")
+	fmt.Printf("Finger[1]: %s\n", n.FingerTable[1].IP)
+	fmt.Printf("Finger[160]: %s\n", n.FingerTable[160].IP)
 
 	// data storage info
 	fmt.Println("\n------- DATA BUCKET --------")
@@ -145,8 +152,13 @@ func (n *Node) Create() {
 		},
 	}
 
-	// testdata
-	n.Bucket["test.txt"] = "Hello World"
+	// initialize finger table - all fingers point to ourselves since we are the only node
+	for i := 1; i <= KeySize; i++ {
+		n.FingerTable[i] = &NodeInfo{
+			ID: n.ID,
+			IP: n.IP,
+		}
+	}
 
 	fmt.Println("NEW CHORD RING CREATED")
 }
@@ -173,6 +185,11 @@ func (n *Node) Join(bootstrapNode string) error {
 	}
 
 	n.Successor = []*NodeInfo{reply.Node}
+
+	// initialize finger table
+	for i := 1; i <= KeySize; i++ {
+		n.FingerTable[i] = reply.Node
+	}
 
 	fmt.Printf("Joined Chord Ring by Node: %s\n", bootstrapNode)
 	fmt.Printf("My Successor's Node IP is: %s\n", n.Successor[0].IP)

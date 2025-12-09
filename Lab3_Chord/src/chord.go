@@ -14,7 +14,6 @@ func main() {
 
 	// create node
 	node := NewNode(config.IP, config.PORT)
-	node.PrintState()
 
 	// start RPC server
 	err := node.StartRPCServer()
