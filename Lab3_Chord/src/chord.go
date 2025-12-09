@@ -41,15 +41,27 @@ func main() {
 
 	// start goroutine stabilization in background
 	go func() {
-		// create timer that ticks every 3 seconds
-		ticker := time.NewTicker(3 * time.Second)
-		defer ticker.Stop()
+		// create 3 separate timers
+		// one timer for every func
+		stabilizeTicker := time.NewTicker(time.Duration(config.StabilizeTime) * time.Millisecond)
+		fixFingersTicker := time.NewTicker(time.Duration(config.FixFingersTime) * time.Millisecond)
+		checkPredTicker := time.NewTicker(time.Duration(config.CheckPredTime) * time.Millisecond)
+
+		defer stabilizeTicker.Stop()
+		defer fixFingersTicker.Stop()
+		defer checkPredTicker.Stop()
 
 		for {
-			// wait on next tick
-			<-ticker.C
-			// run stabilize when ticks
-			node.Stabilize()
+			select {
+			case <-stabilizeTicker.C:
+				node.Stabilize()
+
+			case <-fixFingersTicker.C:
+				// todo: call fixFingers
+
+			case <-checkPredTicker.C:
+				// todo: call checkPred
+			}
 		}
 	}()
 

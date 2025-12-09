@@ -13,12 +13,12 @@ import (
 	"strings"
 )
 
-// Local Node
 type Node struct {
 	ID          *big.Int
-	IP          string      // IP:PORT Address
-	Successor   []*NodeInfo // list of nodes in ring
-	Predecessor *NodeInfo   // previous node in ring
+	IP          string            // IP:PORT Address
+	Successor   []*NodeInfo       // list of nodes in ring
+	Predecessor *NodeInfo         // previous node in ring
+	Bucket      map[string]string // Data-storage
 }
 
 // NodeInfo = information about a remote node
@@ -36,6 +36,7 @@ func NewNode(ip string, port int) *Node {
 		IP:          ipAddress,
 		Successor:   nil,
 		Predecessor: nil,
+		Bucket:      make(map[string]string),
 	}
 
 	return node
@@ -63,7 +64,7 @@ func (n *Node) StartRPCServer() error {
 
 // print complete state of this node
 func (n *Node) PrintState() {
-	fmt.Printf("\n===== NODE-STATE =====\n")
+	fmt.Printf("\n======= NODE-STATE =========\n")
 
 	// own node info
 	fmt.Printf("Node ID: %s\n", IDToString(n.ID))
@@ -71,7 +72,7 @@ func (n *Node) PrintState() {
 
 	// successor info
 	fmt.Println("\n----- SUCCESSOR NODE -------")
-	if n.Successor != nil && len(n.Successor) > 0 {
+	if len(n.Successor) > 0 {
 		fmt.Printf("Successor ID: %s\n", IDToString(n.Successor[0].ID))
 		fmt.Printf("Successor IP: %s\n", n.Successor[0].IP)
 	} else {
@@ -87,7 +88,18 @@ func (n *Node) PrintState() {
 		fmt.Printf("Predecessor Node: None\n")
 	}
 
-	fmt.Printf("======================\n")
+	// data storage info
+	fmt.Println("\n------- DATA BUCKET --------")
+	if len(n.Bucket) <= 0 {
+		fmt.Printf("Data Stored: None\n")
+	} else {
+		fmt.Printf("Data Stored: %d\n", len(n.Bucket))
+		for key := range n.Bucket {
+			fmt.Printf("%s\n", key)
+		}
+	}
+
+	fmt.Printf("============================\n")
 	fmt.Println()
 }
 
@@ -107,6 +119,10 @@ func (n *Node) Create() {
 			IP: n.IP,
 		},
 	}
+
+	// testdata
+	n.Bucket["test.txt"] = "Hello World"
+
 	fmt.Println("NEW CHORD RING CREATED")
 }
 
