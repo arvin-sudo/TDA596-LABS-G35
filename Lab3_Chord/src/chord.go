@@ -22,6 +22,11 @@ func main() {
 		return
 	}
 
+	// Note: StartRPCServer returns after net.Listen() succeeds,
+	// so the server is already listening at this point.
+	// Small delay to ensure http.Serve goroutine is fully started.
+	time.Sleep(100 * time.Millisecond)
+
 	// create new or join chord ring based on config
 	if config.JoinIP == "" {
 		// no join address = create new ring

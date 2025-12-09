@@ -11,9 +11,11 @@ import (
 	"net/rpc"
 	"os"
 	"strings"
+	"sync"
 )
 
 type Node struct {
+	mu          sync.RWMutex
 	ID          *big.Int
 	IP          string            // IP:PORT Address
 	Successor   []*NodeInfo       // list of nodes in ring
@@ -56,16 +58,24 @@ func (n *Node) StartRPCServer() error {
 		return err
 	}
 
-	fmt.Printf("RPC Server listening on IP: %s\n", n.IP)
+	// Start serving in goroutine
+	go func() {
+		if err := http.Serve(listener, nil); err != nil {
+			fmt.Printf("RPC Server error: %v\n", err)
+		}
+	}()
 
-	// Start serving (in goroutine so it doesn't block)
-	go http.Serve(listener, nil)
+	// Server is now listening (net.Listen completed successfully)
+	fmt.Printf("RPC Server listening on IP: %s\n", n.IP)
 
 	return nil
 }
 
 // print complete state of this node
 func (n *Node) PrintState() {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
 	fmt.Printf("\n======= NODE-STATE =========\n")
 
 	// own node info
@@ -92,8 +102,16 @@ func (n *Node) PrintState() {
 
 	// fingerTable info
 	fmt.Println("\n------- FINGER TABLE --------")
-	fmt.Printf("Finger[1]: %s\n", n.FingerTable[1].IP)
-	fmt.Printf("Finger[160]: %s\n", n.FingerTable[160].IP)
+	if n.FingerTable[1] != nil {
+		fmt.Printf("Finger[1]: %s\n", n.FingerTable[1].IP)
+	} else {
+		fmt.Printf("Finger[1]: None\n")
+	}
+	if n.FingerTable[160] != nil {
+		fmt.Printf("Finger[160]: %s\n", n.FingerTable[160].IP)
+	} else {
+		fmt.Printf("Finger[160]: None\n")
+	}
 
 	// data storage info
 	fmt.Println("\n------- DATA BUCKET --------")
@@ -112,14 +130,19 @@ func (n *Node) PrintState() {
 
 // ping - rpc method to check if node is alive
 func (n *Node) Ping(args *EmptyArgs, reply *PingReply) error {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
 	reply.NodeID = IDToString(n.ID)
 	reply.NodeIP = n.IP
 	return nil
 }
 
 // PUT - rpc method to store data
-// RACE CONDITION - NEEDS FIXING MUTEX
 func (n *Node) Put(args *PutArgs, reply *PutReply) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
 	n.Bucket[args.Key] = args.Value
 	fmt.Printf("PUT: Stored [%s]\n", args.Key)
 	return nil
@@ -127,6 +150,9 @@ func (n *Node) Put(args *PutArgs, reply *PutReply) error {
 
 // GET - rpc method to fetch data content
 func (n *Node) Get(args *GetArgs, reply *GetReply) error {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
 	value, exists := n.Bucket[args.Key]
 
 	if !exists {
@@ -144,6 +170,9 @@ func (n *Node) Get(args *GetArgs, reply *GetReply) error {
 
 // create a new chord ring (one alone node)
 func (n *Node) Create() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
 	// in a ring with only one node, we are our own successor
 	n.Successor = []*NodeInfo{
 		{
@@ -165,6 +194,9 @@ func (n *Node) Create() {
 
 // FindSuccessor - RPC method to find the successor node of an ID
 func (n *Node) FindSuccessor(args *FindSuccessorArgs, reply *FindSuccessorReply) error {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
 	id := args.ID
 
 	if InBetween(id, n.ID, n.Successor[0].ID, true) {
@@ -178,21 +210,25 @@ func (n *Node) FindSuccessor(args *FindSuccessorArgs, reply *FindSuccessorReply)
 
 // join an existing chord ring
 func (n *Node) Join(bootstrapNode string) error {
+	// Step 1: Do RPC without holding lock
 	var reply FindSuccessorReply
 	err := CallNode(bootstrapNode, "Node.FindSuccessor", &FindSuccessorArgs{ID: n.ID}, &reply)
 	if err != nil {
 		return fmt.Errorf("Failed to contact bootstrap node: %v", err)
 	}
 
+	// Step 2: Update local state with lock
+	n.mu.Lock()
 	n.Successor = []*NodeInfo{reply.Node}
 
 	// initialize finger table
 	for i := 1; i <= KeySize; i++ {
 		n.FingerTable[i] = reply.Node
 	}
+	n.mu.Unlock()
 
 	fmt.Printf("Joined Chord Ring by Node: %s\n", bootstrapNode)
-	fmt.Printf("My Successor's Node IP is: %s\n", n.Successor[0].IP)
+	fmt.Printf("My Successor's Node IP is: %s\n", reply.Node.IP)
 
 	return nil
 }
@@ -232,7 +268,7 @@ func (n *Node) Lookup(key string) (*NodeInfo, error) {
 
 	fmt.Printf("Lookup key '%s' (ID: %s)\n", key, IDToString(id))
 
-	// use iterativ search to find successor
+	// use iterative search to find successor
 	successor, err := n.findSuccessorIterative(id)
 	if err != nil {
 		return nil, err
@@ -245,6 +281,9 @@ func (n *Node) Lookup(key string) (*NodeInfo, error) {
 
 // RPC method to get this nodes predecessor
 func (n *Node) GetPredecessor(args *EmptyArgs, reply *GetPredecessorReply) error {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
 	reply.Predecessor = n.Predecessor
 	return nil
 }
@@ -259,6 +298,9 @@ func (n *Node) GetPredecessor(args *EmptyArgs, reply *GetPredecessorReply) error
 // or is Node B between my predecessor Node A and me Node C? (Yes, ID: 100 < 300 < 500)
 // Result: Node B is Node C new predecessor: Node C.Predecessor = Node B
 func (n *Node) Notify(args *NotifyArgs, reply *EmptyReply) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
 	candidate := args.Node // new node
 
 	// Dont accept ourselves as predecessor
@@ -277,31 +319,48 @@ func (n *Node) Notify(args *NotifyArgs, reply *EmptyReply) error {
 
 // stabilize - periodically verify and update successor and predecessor
 func (n *Node) Stabilize() {
+	// step 1: read current state (read lock)
+	n.mu.RLock()
+	successorIP := n.Successor[0].IP
+	myID := n.ID
+	myIP := n.IP
+	n.mu.RUnlock()
+
+	// step 2: make rpc calls (without holding lock to avoid deadlock)
 	// ask our successor: who is your predecessor?
 	var reply GetPredecessorReply
-	err := CallNode(n.Successor[0].IP, "Node.GetPredecessor", &EmptyArgs{}, &reply)
+	err := CallNode(successorIP, "Node.GetPredecessor", &EmptyArgs{}, &reply)
 	if err != nil {
-		fmt.Printf("Stabilize: Failed to call Successor Node %s\n", n.Successor[0].IP)
+		fmt.Printf("Stabilize: Failed to call Successor Node %s\n", successorIP)
 		return
 	}
-
 	replyFromPredecessor := reply.Predecessor
 
+	// step 3: update state based on reply with lock
 	// if successor has a predecessor, and its between us and successor, it should be our new successor
-	if replyFromPredecessor != nil && replyFromPredecessor.IP != n.IP {
+	n.mu.Lock()
+	if n.Successor[0] == nil || n.Successor[0].IP != successorIP {
+		n.mu.Unlock()
+		return
+	}
+	if replyFromPredecessor != nil && replyFromPredecessor.IP != myIP {
 		// special case: if we point to ourselves, accept any predecessor
-		if n.Successor[0].IP == n.IP {
+		if successorIP == myIP {
 			n.Successor[0] = replyFromPredecessor
 			fmt.Printf("Stabilize: Updated Successor to %s (was pointing to self)\n", replyFromPredecessor.IP)
-		} else if InBetween(replyFromPredecessor.ID, n.ID, n.Successor[0].ID, true) {
+		} else if InBetween(replyFromPredecessor.ID, myID, n.Successor[0].ID, true) {
 			n.Successor[0] = replyFromPredecessor
 			fmt.Printf("Stabilize: Updated Successor to %s\n", replyFromPredecessor.IP)
 		}
 	}
-	// notify our successor that we might be its predecessor
-	err = CallNode(n.Successor[0].IP, "Node.Notify", &NotifyArgs{Node: &NodeInfo{ID: n.ID, IP: n.IP}}, &EmptyReply{})
+	// read successor again in case it was updated
+	successorIP = n.Successor[0].IP
+	n.mu.Unlock()
+
+	// step 4: notify our successor that we might be its predecessor (without lock)
+	err = CallNode(successorIP, "Node.Notify", &NotifyArgs{Node: &NodeInfo{ID: myID, IP: myIP}}, &EmptyReply{})
 	if err != nil {
-		fmt.Printf("Stabilize: Failed to notify Successor %s\n", n.Successor[0].IP)
+		fmt.Printf("Stabilize: Failed to notify Successor %s\n", successorIP)
 	}
 }
 

@@ -15,7 +15,7 @@ const (
 )
 
 /*
- In Chord each node as a unique ID (160-bit number from SHA-1).
+ In Chord each node has a unique ID (160-bit number from SHA-1).
  Create this ID by hashing the nodes IP:PORT
 */
 

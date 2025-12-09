@@ -25,7 +25,7 @@ type Config struct {
 	SuccessorCount int // -r
 
 	// optional ID override
-	IDOveride string // -i
+	IDOverride string // -i
 }
 
 func ParseArgs() *Config {
@@ -43,7 +43,7 @@ func ParseArgs() *Config {
 
 	flag.IntVar(&config.SuccessorCount, "r", 0, "Number of Successors to maintain")
 
-	flag.StringVar(&config.IDOveride, "i", "", "Optional ID Override (40 hex char)")
+	flag.StringVar(&config.IDOverride, "i", "", "Optional ID Override (40 hex char)")
 
 	flag.Parse()
 
@@ -86,14 +86,14 @@ func ParseArgs() *Config {
 	}
 
 	// validate ID override format (if provided, must be 40 hex chars)
-	if config.IDOveride != "" {
-		if len(config.IDOveride) != 40 {
+	if config.IDOverride != "" {
+		if len(config.IDOverride) != 40 {
 			fmt.Println("Error: -i must be exactly 40 hex characters")
 			os.Exit(1)
 		}
 
 		// check if all characters are hex [0-9a-fA-F]
-		for _, c := range config.IDOveride {
+		for _, c := range config.IDOverride {
 			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
 				fmt.Println("Error: -i must contain only hex characters [0-9a-fA-F]")
 				os.Exit(1)
