@@ -155,7 +155,7 @@ func (n *Node) Create() {
 func (n *Node) FindSuccessor(args *FindSuccessorArgs, reply *FindSuccessorReply) error {
 	id := args.ID
 
-	if InRange(id, n.ID, n.Successor[0].ID) {
+	if InBetween(id, n.ID, n.Successor[0].ID, true) {
 		reply.Node = n.Successor[0]
 		return nil
 	}
@@ -194,7 +194,7 @@ func (n *Node) findSuccessorIterative(id *big.Int) (*NodeInfo, error) {
 		}
 
 		// if the reply is between current node and reply.successor
-		if InRange(id, current.ID, reply.Node.ID) {
+		if InBetween(id, current.ID, reply.Node.ID, true) {
 			return reply.Node, nil
 		}
 
@@ -250,7 +250,7 @@ func (n *Node) Notify(args *NotifyArgs, reply *EmptyReply) error {
 	}
 
 	// if existing node have no predecessor, or new node is between my existing predecessor and I (existing node) = accept
-	if n.Predecessor == nil || InRange(candidate.ID, n.Predecessor.ID, n.ID) {
+	if n.Predecessor == nil || InBetween(candidate.ID, n.Predecessor.ID, n.ID, true) {
 		n.Predecessor = candidate // Node C sets New Node B as its predecessor
 		fmt.Printf("Notify: Updated Predecessor Node IP to: %s\n", candidate.IP)
 	}
@@ -276,7 +276,7 @@ func (n *Node) Stabilize() {
 		if n.Successor[0].IP == n.IP {
 			n.Successor[0] = replyFromPredecessor
 			fmt.Printf("Stabilize: Updated Successor to %s (was pointing to self)\n", replyFromPredecessor.IP)
-		} else if InRange(replyFromPredecessor.ID, n.ID, n.Successor[0].ID) {
+		} else if InBetween(replyFromPredecessor.ID, n.ID, n.Successor[0].ID, true) {
 			n.Successor[0] = replyFromPredecessor
 			fmt.Printf("Stabilize: Updated Successor to %s\n", replyFromPredecessor.IP)
 		}
