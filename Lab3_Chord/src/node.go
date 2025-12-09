@@ -71,9 +71,9 @@ func (n *Node) PrintState() {
 
 	// successor info
 	fmt.Println("\n----- SUCCESSOR NODE -------")
-	if n.Successor != nil {
-		fmt.Printf("Successor ID: %s\n", IDToString(n.Successor.ID))
-		fmt.Printf("Successor IP: %s\n", n.Successor.IP)
+	if n.Successor != nil && len(n.Successor) > 0 {
+		fmt.Printf("Successor ID: %s\n", IDToString(n.Successor[0].ID))
+		fmt.Printf("Successor IP: %s\n", n.Successor[0].IP)
 	} else {
 		fmt.Printf("Successor Node: None\n")
 	}
@@ -114,12 +114,12 @@ func (n *Node) Create() {
 func (n *Node) FindSuccessor(args *FindSuccessorArgs, reply *FindSuccessorReply) error {
 	id := args.ID
 
-	if InRange(id, n.ID, n.Successor.ID) {
-		reply.Node = n.Successor
+	if InRange(id, n.ID, n.Successor[0].ID) {
+		reply.Node = n.Successor[0]
 		return nil
 	}
 
-	reply.Node = n.Successor
+	reply.Node = n.Successor[0]
 	return nil
 }
 
@@ -131,10 +131,10 @@ func (n *Node) Join(bootstrapNode string) error {
 		return fmt.Errorf("Failed to contact bootstrap node: %v", err)
 	}
 
-	n.Successor = reply.Node
+	n.Successor = []*NodeInfo{reply.Node}
 
 	fmt.Printf("Joined Chord Ring by Node: %s\n", bootstrapNode)
-	fmt.Printf("My Successor's Node IP is: %s\n", n.Successor.IP)
+	fmt.Printf("My Successor's Node IP is: %s\n", n.Successor[0].IP)
 
 	return nil
 }
@@ -221,9 +221,9 @@ func (n *Node) Notify(args *NotifyArgs, reply *EmptyReply) error {
 func (n *Node) Stabilize() {
 	// ask our successor: who is your predecessor?
 	var reply GetPredecessorReply
-	err := CallNode(n.Successor.IP, "Node.GetPredecessor", &EmptyArgs{}, &reply)
+	err := CallNode(n.Successor[0].IP, "Node.GetPredecessor", &EmptyArgs{}, &reply)
 	if err != nil {
-		fmt.Printf("Stabilize: Failed to call Successor Node %s\n", n.Successor.IP)
+		fmt.Printf("Stabilize: Failed to call Successor Node %s\n", n.Successor[0].IP)
 		return
 	}
 
@@ -232,18 +232,18 @@ func (n *Node) Stabilize() {
 	// if successor has a predecessor, and its between us and successor, it should be our new successor
 	if replyFromPredecessor != nil && replyFromPredecessor.IP != n.IP {
 		// special case: if we point to ourselves, accept any predecessor
-		if n.Successor.IP == n.IP {
-			n.Successor = replyFromPredecessor
+		if n.Successor[0].IP == n.IP {
+			n.Successor[0] = replyFromPredecessor
 			fmt.Printf("Stabilize: Updated Successor to %s (was pointing to self)\n", replyFromPredecessor.IP)
-		} else if InRange(replyFromPredecessor.ID, n.ID, n.Successor.ID) {
-			n.Successor = replyFromPredecessor
+		} else if InRange(replyFromPredecessor.ID, n.ID, n.Successor[0].ID) {
+			n.Successor[0] = replyFromPredecessor
 			fmt.Printf("Stabilize: Updated Successor to %s\n", replyFromPredecessor.IP)
 		}
 	}
 	// notify our successor that we might be its predecessor
-	err = CallNode(n.Successor.IP, "Node.Notify", &NotifyArgs{Node: &NodeInfo{ID: n.ID, IP: n.IP}}, &EmptyReply{})
+	err = CallNode(n.Successor[0].IP, "Node.Notify", &NotifyArgs{Node: &NodeInfo{ID: n.ID, IP: n.IP}}, &EmptyReply{})
 	if err != nil {
-		fmt.Printf("Stabilize: Failed to notify Successor %s\n", n.Successor.IP)
+		fmt.Printf("Stabilize: Failed to notify Successor %s\n", n.Successor[0].IP)
 	}
 }
 
