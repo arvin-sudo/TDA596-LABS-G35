@@ -79,3 +79,20 @@ func InBetween(id, start, end *big.Int, inclusive bool) bool {
 		return id.Cmp(start) > 0 || id.Cmp(end) < 0
 	}
 }
+
+// jump - calculate the target ID for finger table entry i
+// returns: (nodeID + 2^(i-1)) mod 2^m where m = 160
+func Jump(nodeID *big.Int, fingerIndex int) *big.Int {
+	// calculate 2^(fingerIndex - 1)
+	power := big.NewInt(int64(fingerIndex - 1))
+	offset := new(big.Int).Exp(big.NewInt(2), power, nil)
+
+	// add offset to nodeID
+	target := new(big.Int).Add(nodeID, offset)
+
+	// mod 2^160 to wrap around the ring
+	hashMod := new(big.Int).Exp(big.NewInt(2), big.NewInt(KeySize), nil)
+	result := new(big.Int).Mod(target, hashMod)
+
+	return result
+}

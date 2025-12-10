@@ -55,13 +55,16 @@ func main() {
 		defer fixFingersTicker.Stop()
 		defer checkPredTicker.Stop()
 
+		// track which finger to fix next (1-160, circular)
+		nextFinger := 1
+
 		for {
 			select {
 			case <-stabilizeTicker.C:
 				node.Stabilize()
 
 			case <-fixFingersTicker.C:
-				// todo: call fixFingers
+				nextFinger = node.FixFingers(nextFinger)
 
 			case <-checkPredTicker.C:
 				node.CheckPredecessor()

@@ -102,15 +102,19 @@ func (n *Node) PrintState() {
 
 	// fingerTable info
 	fmt.Println("\n------- FINGER TABLE -------")
-	if n.FingerTable[1] != nil {
-		fmt.Printf("Finger[1]: %s\n", n.FingerTable[1].IP)
-	} else {
-		fmt.Printf("Finger[1]: None\n")
+	prevIP := ""
+	for i := 1; i <= KeySize; i++ {
+		if n.FingerTable[i] != nil {
+			currentIP := n.FingerTable[i].IP
+			// only print when IP changes (skip duplicates)
+			if currentIP != prevIP {
+				fmt.Printf("Finger[%d]: %s (ID: %s)\n", i, currentIP, IDToString(n.FingerTable[i].ID))
+				prevIP = currentIP
+			}
+		}
 	}
-	if n.FingerTable[160] != nil {
-		fmt.Printf("Finger[160]: %s\n", n.FingerTable[160].IP)
-	} else {
-		fmt.Printf("Finger[160]: None\n")
+	if prevIP == "" {
+		fmt.Println("Finger Table: None")
 	}
 
 	// data storage info
@@ -298,7 +302,7 @@ func (n *Node) Lookup(key string) (*NodeInfo, error) {
 		return nil, err
 	}
 
-	fmt.Printf("Key '%s' is stored at node %s (ID: %s)\n", key, IDToString(successor.ID), successor.IP)
+	fmt.Printf("Key '%s' is stored at Node: %s (ID: %s)\n", key, successor.IP, IDToString(successor.ID))
 
 	return successor, nil
 }
@@ -415,6 +419,32 @@ func (n *Node) CheckPredecessor() {
 		n.mu.Unlock()
 		fmt.Printf("CheckPredecessor: Predecessor %s Failed, removed\n", currentPredecessor.IP)
 	}
+}
+
+// FixFingers - periodically update one entry in the finger table
+func (n *Node) FixFingers(next int) int {
+	// calculate target ID for this finger entry: (n + 2^(next-1)) mod 2^m
+	targetID := Jump(n.ID, next)
+
+	// find successor that target ID
+	successor, err := n.findSuccessorIterative(targetID)
+	if err != nil {
+		fmt.Printf("FixFingers: Failed to find successor for finger[%d]: %v\n", next, err)
+		// dont update this finger, try again next time
+	} else {
+		// update the finger table entry
+		n.mu.Lock()
+		n.FingerTable[next] = successor
+		n.mu.Unlock()
+	}
+
+	// move to next finger (circular: 1 -> 2 -> ... -> 160 -> 1 -> 2)
+	next++
+	if next > KeySize {
+		next = 1
+	}
+
+	return next
 }
 
 // interactive commandloop for user input
