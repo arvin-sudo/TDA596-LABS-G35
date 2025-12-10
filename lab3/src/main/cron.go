@@ -1,4 +1,4 @@
-package lab3
+package main
 
 import (
 	"math"
