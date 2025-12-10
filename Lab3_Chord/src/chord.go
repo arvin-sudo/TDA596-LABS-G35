@@ -64,7 +64,7 @@ func main() {
 				// todo: call fixFingers
 
 			case <-checkPredTicker.C:
-				// todo: call checkPred
+				node.CheckPredecessor()
 			}
 		}
 	}()

@@ -192,6 +192,28 @@ func (n *Node) Create() {
 	fmt.Println("NEW CHORD RING CREATED")
 }
 
+// closestPrecedingNode - find the closest node in finger table that precedes ID
+// loop backwards in finger table (160 down to 1) - check if finger is between me and target
+func (n *Node) closestPrecedingNode(id *big.Int) *NodeInfo {
+	// search finger table from furthest to closest
+	for i := KeySize; i >= 1; i-- {
+		finger := n.FingerTable[i]
+
+		// skip if finger is nil or points to this node (n.IP)
+		if finger == nil || finger.IP == n.IP {
+			continue
+		}
+
+		// check if this finger is between this node and target id: n.ID < finger.ID < id (not inclusive)
+		if InBetween(finger.ID, n.ID, id, false) {
+			return finger
+		}
+	}
+
+	// no better node found in finger table, return this nodes successor
+	return n.Successor[0]
+}
+
 // FindSuccessor - RPC method to find the successor node of an ID
 func (n *Node) FindSuccessor(args *FindSuccessorArgs, reply *FindSuccessorReply) error {
 	n.mu.RLock()
@@ -199,12 +221,14 @@ func (n *Node) FindSuccessor(args *FindSuccessorArgs, reply *FindSuccessorReply)
 
 	id := args.ID
 
+	// if ID is between itself and its successor, its successor is the answer
 	if InBetween(id, n.ID, n.Successor[0].ID, true) {
 		reply.Node = n.Successor[0]
 		return nil
 	}
 
-	reply.Node = n.Successor[0]
+	// otherwise, find the closest preceding node to forward the query to
+	reply.Node = n.closestPrecedingNode(id)
 	return nil
 }
 
@@ -332,6 +356,13 @@ func (n *Node) Stabilize() {
 	err := CallNode(successorIP, "Node.GetPredecessor", &EmptyArgs{}, &reply)
 	if err != nil {
 		fmt.Printf("Stabilize: Failed to call Successor Node %s\n", successorIP)
+
+		// if successor is dead, revert to single-node ring
+		n.mu.Lock()
+		n.Successor[0] = &NodeInfo{ID: myID, IP: myIP}
+		n.mu.Unlock()
+		fmt.Printf("Stabilize: Successor Dead -> Reverting to single-node ring\n")
+
 		return
 	}
 	replyFromPredecessor := reply.Predecessor
@@ -361,6 +392,28 @@ func (n *Node) Stabilize() {
 	err = CallNode(successorIP, "Node.Notify", &NotifyArgs{Node: &NodeInfo{ID: myID, IP: myIP}}, &EmptyReply{})
 	if err != nil {
 		fmt.Printf("Stabilize: Failed to notify Successor %s\n", successorIP)
+	}
+}
+
+// check predecessor if its still alive
+func (n *Node) CheckPredecessor() {
+	// read current predecessor
+	n.mu.RLock()
+	currentPredecessor := n.Predecessor
+	n.mu.RUnlock()
+
+	if currentPredecessor == nil {
+		return
+	}
+
+	// ping predecessor without lock to avoid deadlock
+	var reply PingReply
+	err := CallNode(currentPredecessor.IP, "Node.Ping", &EmptyArgs{}, &reply)
+	if err != nil {
+		n.mu.Lock()
+		n.Predecessor = nil
+		n.mu.Unlock()
+		fmt.Printf("CheckPredecessor: Predecessor %s Failed, removed\n", currentPredecessor.IP)
 	}
 }
 
