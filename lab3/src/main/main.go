@@ -1,21 +1,25 @@
 package main
 
 import (
+	"bufio"
 	"crypto/sha1"
 	"flag"
 	"fmt"
-	"github.com/davecgh/go-spew/spew"
 	"math/big"
 	"net"
 	"net/http"
 	"net/rpc"
+	"os"
 	"strconv"
+	"strings"
 	"sync"
+	"time"
 )
 
 var maxSteps = 32
 var fingerTableLen = 161 // fixed
-var successorsLen = 0    // 1-32
+var fixFingerTableDone = false
+var successorsLen = 0 // 1-32
 var next = 0
 
 // chord. range: (predecessor_id, id]
@@ -27,7 +31,7 @@ type Chord struct {
 	FingerTable []*Chord
 
 	Predecessor *Chord
-	Successor   *Chord
+	Successors  []*Chord
 
 	// my node info
 	Id     *big.Int // my id
@@ -41,22 +45,35 @@ type Chord struct {
 }
 
 // create chord ring
-func createChordRing(myId *big.Int, myIpAddress string) *Chord {
+func createChordRing(myId *big.Int, myIpAddress string, successorsNumber int) *Chord {
 	chord := &Chord{}
 	chord.Id = myId
 	chord.IpAddr = myIpAddress
 	chord.Predecessor = nil
-	chord.Successor = chord
+	chord.Successors = make([]*Chord, successorsNumber)
+	for i := 0; i < successorsNumber; i++ {
+		chord.Successors[i] = chord
+	}
 	chord.FingerTable = make([]*Chord, fingerTableLen)
 	for i := 1; i < fingerTableLen; i++ {
 		chord.FingerTable[i] = chord
 	}
-	spew.Dump(chord)
+	//spew.Dump(chord)
 	return chord
 }
 
 // join chord ring
-func (c *Chord) joinChordRing(chord *Chord) {
+func (c *Chord) joinChordRing(chord *Chord, successorsNumber int) {
+	// initialize successor to itself firstly, then change to existing chord ring successors.
+	c.Successors = make([]*Chord, successorsNumber)
+	for i := 0; i < successorsNumber; i++ {
+		c.Successors[i] = c
+	}
+	c.FingerTable = make([]*Chord, fingerTableLen)
+	for i := 1; i < fingerTableLen; i++ {
+		c.FingerTable[i] = c
+	}
+
 	c.Predecessor = nil
 	chordDTO := &ChordDTO{
 		Id:     chord.Id,
@@ -64,22 +81,39 @@ func (c *Chord) joinChordRing(chord *Chord) {
 	}
 	find := chord.find(c.Id, chordDTO)
 	if find != nil {
-		c.Successor = &Chord{
+		c.Successors[0] = &Chord{
 			Id:     find.Id,
 			IpAddr: find.IpAddr,
+		}
+	}
+
+	getSuccessorListReply := &GetSuccessorListReply{}
+	ok := call(c.Successors[0].IpAddr, "Chord.GetSuccessorList", &GetSuccessorListArgs{}, getSuccessorListReply)
+	if ok {
+		for i := 1; i < successorsNumber; i++ {
+			if i-1 < len(getSuccessorListReply.Successors) {
+				dto := getSuccessorListReply.Successors[i-1]
+				c.Successors[i] = &Chord{
+					Id:     dto.Id,
+					IpAddr: dto.IpAddr,
+				}
+
+			}
 		}
 	}
 
 }
 
 // local: closest_preceding_node
-func (c *Chord) closestPrecedingNode(id int64) *Chord {
-	for i := len(c.FingerTable) - 1; i > 0; i-- {
-		if c.FingerTable[i].Id > c.Id && c.FingerTable[i].Id < id {
-			return c.FingerTable[i]
+func (c *Chord) closestPrecedingNode(id *big.Int) *Chord {
+	if fixFingerTableDone {
+		for i := len(c.FingerTable) - 1; i > 0; i-- {
+			if InBetween(c.FingerTable[i].Id, c.Id, id) {
+				return c.FingerTable[i]
+			}
 		}
 	}
-	return c.Successor
+	return c.Successors[0]
 }
 
 // local: hash function
@@ -99,16 +133,17 @@ func hash(str string) *big.Int {
 // rpc call
 func call(address string, method string, args interface{}, reply interface{}) bool {
 	c, err := rpc.DialHTTP("tcp", address)
-	defer c.Close()
+
 	if err != nil {
-		fmt.Printf("rpc dial err: %s\n", err)
+		fmt.Printf("rpc dial err: %s, method: %s\n", err, method)
 		return false
 	}
 	err = c.Call(method, args, reply)
 	if err != nil {
-		fmt.Printf("rpc call err: %s\n", err)
+		fmt.Printf("rpc call err: %s, method: %s\n", err, method)
 		return false
 	}
+	c.Close()
 	return true
 }
 
@@ -225,15 +260,56 @@ func main() {
 			IpAddr: existingIpAddr,
 		}
 		needToAddChordNode := &Chord{
+			Id:     myId,
 			IpAddr: ipAddr,
 		}
-		needToAddChordNode.joinChordRing(existingChordRing)
+		needToAddChordNode.joinChordRing(existingChordRing, *successorsNumber)
 		c = needToAddChordNode
 	} else {
 		fmt.Printf("myid: %s\n", myId.String())
-		c = createChordRing(myId.Int64(), ipAddr)
+		c = createChordRing(myId, ipAddr, *successorsNumber)
 	}
 
 	c.register()
+	c.runBackground(c.checkPredecessor, time.Duration(*checkPredecessor)*time.Millisecond)
+	c.runBackground(c.fixFingerTable, time.Duration(*fixFingerPeriod)*time.Millisecond)
+	c.runBackground(c.stabilize, time.Duration(*stabilizePeriod)*time.Millisecond)
+	// monitor cmd from user
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		line := scanner.Text()
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.Fields(line)
+		cmd := parts[0]
+		switch cmd {
+		case "Lookup":
+		case "StoreFile":
+		case "PrintState":
+			c.Print()
+		default:
+			fmt.Printf("unknown command: %s\n", cmd)
+		}
+	}
 	select {}
+}
+
+func (c *Chord) Print() {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	fmt.Println("------------------ Chord Info ------------------")
+	fmt.Printf("Self id: %v, ipAddr: %s \n", c.Id, c.IpAddr)
+	for i, v := range c.Successors {
+		fmt.Printf("Successors[%d] id: %v, ipAddr: %s\n", i, v.Id, v.IpAddr)
+	}
+	if c.Predecessor != nil {
+		fmt.Printf("Predecessor id: %v, ipAddr: %s \n", c.Predecessor.Id, c.Predecessor.IpAddr)
+	} else {
+		fmt.Printf("Predecessor is  nil \n")
+	}
+	for i := 1; i < len(c.FingerTable); i++ {
+		fmt.Printf("Fingers[%d] id: %v, ipAddr: %s\n", i, c.FingerTable[i].Id, c.FingerTable[i].IpAddr)
+	}
 }
