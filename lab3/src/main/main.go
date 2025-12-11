@@ -4,6 +4,7 @@ import (
 	"crypto/sha1"
 	"flag"
 	"fmt"
+	"github.com/davecgh/go-spew/spew"
 	"math/big"
 	"net"
 	"net/http"
@@ -22,14 +23,16 @@ var next = 0
 // node: {ipaddr, key id,}
 // data: finger table, predecessor, successor, my id, key range?
 type Chord struct {
+	// internal use
 	FingerTable []*Chord
+
 	Predecessor *Chord
 	Successor   *Chord
 
 	// my node info
-	Id     int64  // my id
-	IpAddr string // my ip address
-	// range
+	Id     *big.Int // my id
+	IpAddr string   // my ip address
+	// range, maybe useless
 	Start int64 // exclusive
 	End   int64 // inclusive
 
@@ -38,7 +41,7 @@ type Chord struct {
 }
 
 // create chord ring
-func createChordRing(myId int64, myIpAddress string) *Chord {
+func createChordRing(myId *big.Int, myIpAddress string) *Chord {
 	chord := &Chord{}
 	chord.Id = myId
 	chord.IpAddr = myIpAddress
@@ -48,19 +51,30 @@ func createChordRing(myId int64, myIpAddress string) *Chord {
 	for i := 1; i < fingerTableLen; i++ {
 		chord.FingerTable[i] = chord
 	}
-
+	spew.Dump(chord)
 	return chord
 }
 
 // join chord ring
 func (c *Chord) joinChordRing(chord *Chord) {
 	c.Predecessor = nil
-	c.Successor = chord.find(c.Id, chord)
+	chordDTO := &ChordDTO{
+		Id:     chord.Id,
+		IpAddr: chord.IpAddr,
+	}
+	find := chord.find(c.Id, chordDTO)
+	if find != nil {
+		c.Successor = &Chord{
+			Id:     find.Id,
+			IpAddr: find.IpAddr,
+		}
+	}
+
 }
 
 // local: closest_preceding_node
 func (c *Chord) closestPrecedingNode(id int64) *Chord {
-	for i := len(c.FingerTable) - 1; i >= 0; i-- {
+	for i := len(c.FingerTable) - 1; i > 0; i-- {
 		if c.FingerTable[i].Id > c.Id && c.FingerTable[i].Id < id {
 			return c.FingerTable[i]
 		}
@@ -83,19 +97,19 @@ func hash(str string) *big.Int {
 }
 
 // rpc call
-func call(address string, method string, args interface{}, reply interface{}) error {
+func call(address string, method string, args interface{}, reply interface{}) bool {
 	c, err := rpc.DialHTTP("tcp", address)
 	defer c.Close()
 	if err != nil {
 		fmt.Printf("rpc dial err: %s\n", err)
-		return err
+		return false
 	}
 	err = c.Call(method, args, reply)
 	if err != nil {
 		fmt.Printf("rpc call err: %s\n", err)
-		return err
+		return false
 	}
-	return nil
+	return true
 }
 
 // rpc register
@@ -181,7 +195,7 @@ func main() {
 	}
 
 	// some ip from att or get local ip address.
-	ipAddr := *myIp + strconv.Itoa(*myPort)
+	ipAddr := *myIp + ":" + strconv.Itoa(*myPort)
 	var myId *big.Int
 	if *id == "" {
 		myId = hash(ipAddr)
@@ -198,14 +212,28 @@ func main() {
 	var c *Chord
 	if isJoin {
 		// todo
-		existingChordRing := &Chord{}
-		needToAddChordNode := &Chord{}
+		existingIpAddr := *chordRingIp + ":" + strconv.Itoa(*chordRingPort)
+		reply := &GetIdReply{}
+		ok := call(existingIpAddr, "Chord.GetId", &GetIdArgs{}, reply)
+		if !ok {
+			fmt.Printf("chord get id failed from: %s\n", existingIpAddr)
+			return
+		}
+		fmt.Printf("getid: %d\n", reply.Id)
+		existingChordRing := &Chord{
+			Id:     reply.Id,
+			IpAddr: existingIpAddr,
+		}
+		needToAddChordNode := &Chord{
+			IpAddr: ipAddr,
+		}
 		needToAddChordNode.joinChordRing(existingChordRing)
 		c = needToAddChordNode
 	} else {
+		fmt.Printf("myid: %s\n", myId.String())
 		c = createChordRing(myId.Int64(), ipAddr)
 	}
 
 	c.register()
-
+	select {}
 }

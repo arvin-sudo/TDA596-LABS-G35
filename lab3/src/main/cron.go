@@ -42,15 +42,23 @@ func (c *Chord) fixFingerTable() {
 		next = 1
 	}
 
-	c.FingerTable[next] = c.find(c.Id+int64(math.Pow(2, float64(next-1))), c)
+	chordDTO := &ChordDTO{
+		Id:     c.Id + int64(math.Pow(2, float64(next-1))),
+		IpAddr: c.IpAddr,
+	}
+
+	find := c.find(c.Id+int64(math.Pow(2, float64(next-1))), chordDTO)
+	if find != nil {
+		c.FingerTable[next] = &Chord{Id: find.Id, IpAddr: find.IpAddr}
+	}
 }
 func (c *Chord) checkPredecessor() {
 	if c.Predecessor == nil {
 		return
 	}
 
-	err := c.Predecessor.ping()
-	if err != nil {
+	ok := call(c.Predecessor.IpAddr, "Chord.Ping", &PingArgs{}, &PingReply{})
+	if !ok {
 		c.mutex.Lock()
 		c.Predecessor = nil
 		c.mutex.Unlock()
