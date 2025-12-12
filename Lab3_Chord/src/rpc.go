@@ -54,3 +54,8 @@ type GetReply struct {
 	Value string // data content
 	Found bool   // data exists?
 }
+
+// GetSuccessorList - ask a node for its successor list
+type GetSuccessorListReply struct {
+	Successors []*NodeInfo
+}
