@@ -59,3 +59,12 @@ type GetReply struct {
 type GetSuccessorListReply struct {
 	Successors []*NodeInfo
 }
+
+// ReceiveKeys - receive key-value pairs from another node
+type ReceiveKeysArgs struct {
+	Keys map[string]string // all key-value pairs to receive
+}
+
+type ReceiveKeysReply struct {
+	Success bool
+}

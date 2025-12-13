@@ -174,6 +174,23 @@ func (n *Node) Get(args *GetArgs, reply *GetReply) error {
 	return nil
 }
 
+// ReceiveKeys - rpc method to receive keys from another node - called when a node is shutting down and transfer its data
+func (n *Node) ReceiveKeys(args *ReceiveKeysArgs, reply *ReceiveKeysReply) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	// add all received keys to our bucket
+	for key, value := range args.Keys {
+		n.Bucket[key] = value
+		fmt.Printf("ReceiveKeys: Received [%s]\n", key)
+	}
+
+	fmt.Printf("ReceiveKeys: Successfully Received Total %d keys \n", len(args.Keys))
+	reply.Success = true
+
+	return nil
+}
+
 // create a new chord ring (one alone node)
 func (n *Node) Create() {
 	n.mu.Lock()
@@ -630,8 +647,40 @@ func (n *Node) CommandLoop() {
 			}
 
 		case "exit":
-			// handle exit cmd
+			// handle exit cmd - transfer data to successor before exit
 			fmt.Println("Exiting...")
+
+			// step 1: check if we have a successor
+			n.mu.RLock()
+			hasSuccessor := len(n.Successor) > 0 && n.Successor[0].IP != n.IP
+			successorIP := ""
+			if hasSuccessor {
+				successorIP = n.Successor[0].IP
+			}
+
+			bucketCopy := make(map[string]string)
+			for k, v := range n.Bucket {
+				bucketCopy[k] = v
+			}
+			n.mu.RUnlock()
+
+			// step 2: if we have a successor, transfer all data
+			if hasSuccessor && len(bucketCopy) > 0 {
+				fmt.Printf("Transferring %d keys to Successor %s...\n", len(bucketCopy), successorIP)
+
+				err := CallNode(successorIP, "Node.ReceiveKeys", &ReceiveKeysArgs{
+					Keys: bucketCopy,
+				}, &ReceiveKeysReply{})
+
+				if err != nil {
+					fmt.Printf("Warning: Failed to transfer keys to Successor %s: %v\n", successorIP, err)
+				} else {
+					fmt.Printf("Successfully transferred %d keys to Successor %s\n", len(bucketCopy), successorIP)
+				}
+			}
+
+			// step 3: exit program
+			fmt.Println("Exit Complete")
 			os.Exit(0)
 
 		case "help":
