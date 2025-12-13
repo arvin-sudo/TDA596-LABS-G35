@@ -14,3 +14,10 @@ func TestInBetween(t *testing.T) {
 	fmt.Printf("id: %v, start: %v, end: %v, %t\n", id, start, end, InBetween(id, start, end))
 
 }
+
+func TestSliceArray(t *testing.T) {
+	Successors := []int{1, 2, 3}
+
+	Successors = Successors[1:]
+	fmt.Printf("Successors: %v\n", Successors)
+}

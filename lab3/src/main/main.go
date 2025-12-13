@@ -228,7 +228,7 @@ func main() {
 		fmt.Printf("successors number must be between 1 and 32: %d\n", *successorsNumber)
 		return
 	}
-
+	successorsLen = *successorsNumber
 	// some ip from att or get local ip address.
 	ipAddr := *myIp + ":" + strconv.Itoa(*myPort)
 	var myId *big.Int
@@ -309,7 +309,7 @@ func (c *Chord) Print() {
 	} else {
 		fmt.Printf("Predecessor is  nil \n")
 	}
-	for i := 1; i < len(c.FingerTable); i++ {
-		fmt.Printf("Fingers[%d] id: %v, ipAddr: %s\n", i, c.FingerTable[i].Id, c.FingerTable[i].IpAddr)
-	}
+	//for i := 1; i < len(c.FingerTable); i++ {
+	//	fmt.Printf("Fingers[%d] id: %v, ipAddr: %s\n", i, c.FingerTable[i].Id, c.FingerTable[i].IpAddr)
+	//}
 }

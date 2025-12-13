@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/davecgh/go-spew/spew"
 	"math/big"
 	"time"
 )
@@ -26,29 +27,53 @@ func (c *Chord) stabilize() {
 	//spew.Dump(x)
 	//spew.Dump(c)
 	//spew.Dump(c.Successor)
-	GetPredecessorRep := &GetPredecessorReply{}
 	var x *Chord = nil
-	ok := call(c.Successors[0].IpAddr, "Chord.GetPredecessor", &GetPredecessorArgs{}, GetPredecessorRep)
-	if ok {
-		if GetPredecessorRep.Predecessor != nil {
-			x = &Chord{
-				Id:     GetPredecessorRep.Predecessor.Id,
-				IpAddr: GetPredecessorRep.Predecessor.IpAddr,
+	for {
+		GetPredecessorRep := &GetPredecessorReply{}
+
+		ok := call(c.Successors[0].IpAddr, "Chord.GetPredecessor", &GetPredecessorArgs{}, GetPredecessorRep)
+		if ok {
+			if GetPredecessorRep.Predecessor != nil {
+				x = &Chord{
+					Id:     GetPredecessorRep.Predecessor.Id,
+					IpAddr: GetPredecessorRep.Predecessor.IpAddr,
+				}
 			}
+			break
+		} else {
+			if len(c.Successors) > 0 {
+				c.mutex.Lock()
+				//c.Successors = c.Successors[1:]
+				c.Successors = append(c.Successors[1:], c)
+				spew.Dump(c.Successors)
+				c.mutex.Unlock()
+			}
+			continue
 		}
+
 	}
-	if x != nil && InBetween(x.Id, c.Id, c.Successors[0].Id) {
-		c.Successors[0] = x
+
+	if x != nil {
+		if InBetween(x.Id, c.Id, c.Successors[0].Id) {
+			c.mutex.Lock()
+			c.Successors[0] = x
+			//c.Successors = c.Successors[1:]
+			//c.Successors = append([]*Chord{x}, c.Successors...)
+			c.mutex.Unlock()
+		}
 	}
 	call(c.Successors[0].IpAddr, "Chord.Notify", &NotifyArgs{ChordDTO: &ChordDTO{Id: c.Id, IpAddr: c.IpAddr}}, &NotifyReply{})
 
 	// update successor list afterwards
 	getSuccessorListReply := &GetSuccessorListReply{}
-	ok = call(c.Successors[0].IpAddr, "Chord.GetSuccessorList", &GetSuccessorListArgs{}, getSuccessorListReply)
+	ok := call(c.Successors[0].IpAddr, "Chord.GetSuccessorList", &GetSuccessorListArgs{}, getSuccessorListReply)
 	if ok {
-		for i := 1; i < len(c.Successors); i++ {
+		c.mutex.Lock()
+		for i := 1; i < successorsLen; i++ {
 			if i-1 < len(getSuccessorListReply.Successors) {
 				dto := getSuccessorListReply.Successors[i-1]
+				//chord :=
+				//c.Successors = append(c.Successors, chord)
 				c.Successors[i] = &Chord{
 					Id:     dto.Id,
 					IpAddr: dto.IpAddr,
@@ -56,6 +81,7 @@ func (c *Chord) stabilize() {
 
 			}
 		}
+		c.mutex.Unlock()
 	}
 }
 
