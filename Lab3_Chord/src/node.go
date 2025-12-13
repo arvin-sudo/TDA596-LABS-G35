@@ -327,7 +327,57 @@ func (n *Node) Lookup(key string) (*NodeInfo, error) {
 
 	fmt.Printf("Key '%s' is stored at Node: %s (ID: %s)\n", key, successor.IP, IDToString(successor.ID))
 
+	// fetch the data from the successor node
+	var getReply GetReply
+	err = CallNode(successor.IP, "Node.Get", &GetArgs{Key: key}, &getReply)
+	if err != nil {
+		fmt.Printf("Warning: Failed to retrieve data from Node %s: %v", successor.IP, err)
+	} else if getReply.Found {
+		fmt.Printf("===== FILE CONTENT ======\n")
+		fmt.Printf("%s\n", getReply.Value)
+		fmt.Printf("=========================\n")
+	} else {
+		fmt.Printf("File: '%s' not found on Node %s\n", key, successor.IP)
+	}
+
 	return successor, nil
+}
+
+// storefile - read a file from disk and store it in the chord ring
+func (n *Node) StoreFile(filename string) error {
+	// step 1: read file from disk
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		return fmt.Errorf("Failed to read file '%s': %v", filename, err)
+	}
+
+	fmt.Printf("Read File: '%s' (%d bytes)\n", filename, len(content))
+
+	// step 2: hash the filename to get ID
+	id := Hash(filename)
+	fmt.Printf("File: '%s' Hashed to ID: (%s)\n", filename, IDToString(id))
+
+	// step 3: find which node is responsible for this ID
+	successor, err := n.findSuccessorIterative(id)
+	if err != nil {
+		return fmt.Errorf("Failed to find Successor for File '%s': %v", filename, err)
+	}
+
+	fmt.Printf("File: '%s' will be stored at Node IP: %s (ID: %s)\n", filename, successor.IP, IDToString(successor.ID))
+
+	// step 4: send the file to that node using PUT RPC
+	err = CallNode(successor.IP, "Node.Put", &PutArgs{
+		Key:   filename,
+		Value: string(content),
+	}, &PutReply{})
+
+	if err != nil {
+		return fmt.Errorf("Failed to store File '%s' at Node IP: %s: %v", filename, successor.IP, err)
+	}
+
+	fmt.Printf("SUCCESS: File '%s' stored on Node IP: %s\n", filename, successor.IP)
+
+	return nil
 }
 
 // RPC method to get this nodes predecessor
@@ -525,6 +575,7 @@ func (n *Node) CommandLoop() {
 	scanner := bufio.NewScanner(os.Stdin)
 	fmt.Println("Available Commands:")
 	fmt.Println(">	Lookup <key>")
+	fmt.Println(">	StoreFile <filename>")
 	fmt.Println(">	PrintState")
 	fmt.Println(">	Help")
 	fmt.Println(">	Exit")
@@ -565,6 +616,19 @@ func (n *Node) CommandLoop() {
 			// handle printstate cmd
 			n.PrintState()
 
+		case "storefile":
+			// handle storefile cmd
+			if len(parts) < 2 {
+				fmt.Println("Correct Usage: StoreFile <filename>")
+				continue
+			}
+
+			filename := parts[1]
+			err := n.StoreFile(filename)
+			if err != nil {
+				fmt.Printf("StoreFile Failed: %v\n", err)
+			}
+
 		case "exit":
 			// handle exit cmd
 			fmt.Println("Exiting...")
@@ -573,10 +637,11 @@ func (n *Node) CommandLoop() {
 		case "help":
 			// print all cmds
 			fmt.Println("Available Commands:")
-			fmt.Println("> Lookup <key>")
-			fmt.Println("> PrintState")
-			fmt.Println("> Help")
-			fmt.Println("> Exit")
+			fmt.Println(">	Lookup <key>")
+			fmt.Println(">	StoreFile <filename>")
+			fmt.Println(">	PrintState")
+			fmt.Println(">	Help")
+			fmt.Println(">	Exit")
 			fmt.Println()
 
 		default:
