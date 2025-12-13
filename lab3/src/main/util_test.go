@@ -21,3 +21,11 @@ func TestSliceArray(t *testing.T) {
 	Successors = Successors[1:]
 	fmt.Printf("Successors: %v\n", Successors)
 }
+
+func TestHash(t *testing.T) {
+	filename := "test.txt"
+	fileId := hash(filename)
+
+	// 430667389744732874662741662527142941914931607386
+	fmt.Printf("fileId: %v\n", fileId)
+}

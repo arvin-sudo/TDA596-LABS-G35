@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"math/big"
 	"net"
 	"net/http"
@@ -235,12 +236,7 @@ func main() {
 	if *id == "" {
 		myId = hash(ipAddr)
 	} else {
-		idnumber, err := strconv.Atoi(*id)
-		if err != nil {
-			fmt.Printf("chord id number is invalid: %d\n", idnumber)
-			return
-		}
-		myId = big.NewInt(int64(idnumber))
+		myId, _ = new(big.Int).SetString(*id, 10)
 	}
 
 	// if has --ja, --jp then join otherwise create a chord ring.
@@ -286,7 +282,49 @@ func main() {
 		cmd := parts[0]
 		switch cmd {
 		case "Lookup":
+			filename := parts[1]
+			fileId := hash(filename)
+			fileChordDTO := c.find(fileId, &ChordDTO{Id: c.Id, IpAddr: c.IpAddr})
+
+			// rpc read content
+			fileReply := &GetFileContentReply{}
+			ok := call(fileChordDTO.IpAddr, "Chord.GetFileContent", &GetFileContentArgs{
+				Name: filename,
+			}, fileReply)
+			if !ok || !fileReply.ReadSuccess {
+				fmt.Printf("Lookup file, name: %s, chord node id: %v, chord node ipAddr: %s, content read fail.\n", filename, fileChordDTO.Id, fileChordDTO.IpAddr)
+			} else {
+				fmt.Printf("Lookup file, name: %s, chord node id: %v, chord node ipAddr: %s, content: %s\n", filename, fileChordDTO.Id, fileChordDTO.IpAddr, fileReply.Content)
+
+			}
+
 		case "StoreFile":
+			filename := parts[1]
+			openFile, err := os.Open(filename)
+			if err != nil {
+				fmt.Printf("open file [%s] failed err: %v\n", filename, err)
+				continue
+			}
+
+			fileContent, err := ioutil.ReadAll(openFile)
+			if err != nil {
+				fmt.Printf("read file [%s] failed err: %v\n", filename, err)
+				continue
+			}
+
+			fileId := hash(filename)
+			fileChordDTO := c.find(fileId, &ChordDTO{Id: c.Id, IpAddr: c.IpAddr})
+
+			ok := call(fileChordDTO.IpAddr, "Chord.SaveFile", &SaveFileArgs{
+				Name:    filename,
+				Content: fileContent,
+			}, &SaveFileReply{})
+
+			if !ok {
+				fmt.Printf("Save file failed.\n")
+			} else {
+				fmt.Printf("Save file success. chord node id: %v, chord node ipAddr: %s\n", fileChordDTO.Id, fileChordDTO.IpAddr)
+			}
 		case "PrintState":
 			c.Print()
 		default:

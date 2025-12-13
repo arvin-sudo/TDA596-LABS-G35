@@ -1,7 +1,12 @@
 package main
 
 import (
+	"errors"
+	"fmt"
+	"io"
+	"io/ioutil"
 	"math/big"
+	"os"
 )
 
 // entity
@@ -142,6 +147,49 @@ func (c *Chord) Notify(args *NotifyArgs, reply *NotifyReply) error {
 		c.mutex.Lock()
 		c.Predecessor = &Chord{Id: dto.Id, IpAddr: dto.IpAddr}
 		c.mutex.Unlock()
+	}
+	return nil
+}
+
+type GetFileContentArgs struct {
+	Name string
+}
+type GetFileContentReply struct {
+	ReadSuccess bool
+	Content     string
+}
+
+func (c *Chord) GetFileContent(args *GetFileContentArgs, reply *GetFileContentReply) error {
+	reply.ReadSuccess = false
+	file, err := os.Open(args.Name)
+	if err != nil {
+
+		return err
+	}
+	content, err := ioutil.ReadAll(file)
+	if err != nil {
+		if !errors.Is(err, io.EOF) {
+			return err
+		}
+	}
+	file.Close()
+
+	reply.Content = string(content)
+	reply.ReadSuccess = true
+	return nil
+}
+
+type SaveFileArgs struct {
+	Name    string
+	Content []byte
+}
+type SaveFileReply struct{}
+
+func (c *Chord) SaveFile(args *SaveFileArgs, reply *SaveFileReply) error {
+	filename := args.Name
+	err := os.WriteFile(filename, args.Content, 0644)
+	if err != nil {
+		fmt.Println(err)
 	}
 	return nil
 }
