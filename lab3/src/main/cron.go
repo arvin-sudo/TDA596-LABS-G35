@@ -1,7 +1,6 @@
 package main
 
 import (
-	"github.com/davecgh/go-spew/spew"
 	"math/big"
 	"time"
 )
@@ -45,7 +44,7 @@ func (c *Chord) stabilize() {
 				c.mutex.Lock()
 				//c.Successors = c.Successors[1:]
 				c.Successors = append(c.Successors[1:], c)
-				spew.Dump(c.Successors)
+				//spew.Dump(c.Successors)
 				c.mutex.Unlock()
 			}
 			continue

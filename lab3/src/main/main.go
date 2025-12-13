@@ -3,12 +3,12 @@ package main
 import (
 	"bufio"
 	"crypto/sha1"
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"io/ioutil"
 	"math/big"
 	"net"
-	"net/http"
 	"net/rpc"
 	"os"
 	"strconv"
@@ -133,18 +133,21 @@ func hash(str string) *big.Int {
 
 // rpc call
 func call(address string, method string, args interface{}, reply interface{}) bool {
-	c, err := rpc.DialHTTP("tcp", address)
+	conf := &tls.Config{InsecureSkipVerify: true}
+	conn, err := tls.Dial("tcp", address, conf)
+	//c, err := rpc.DialHTTP("tcp", address)
 
 	if err != nil {
 		fmt.Printf("rpc dial err: %s, method: %s\n", err, method)
 		return false
 	}
-	err = c.Call(method, args, reply)
+	client := rpc.NewClient(conn)
+	err = client.Call(method, args, reply)
 	if err != nil {
 		fmt.Printf("rpc call err: %s, method: %s\n", err, method)
 		return false
 	}
-	c.Close()
+	client.Close()
 	return true
 }
 
@@ -155,13 +158,28 @@ func (c *Chord) register() {
 		fmt.Printf("rpc register err: %s\n", err)
 		return
 	}
-	rpc.HandleHTTP()
-	listen, err := net.Listen("tcp", c.IpAddr)
+	cert, err := tls.LoadX509KeyPair("cert.pem", "private.pem")
+	if err != nil {
+		fmt.Printf("tls.LoadX509KeyPair err: %s\n", err)
+		return
+	}
+	config := &tls.Config{Certificates: []tls.Certificate{cert}}
+
+	listen, err := tls.Listen("tcp", c.IpAddr, config)
 	if err != nil {
 		fmt.Printf("rpc listen err: %s\n", err)
 		return
 	}
-	go http.Serve(listen, nil)
+	go func() {
+		for {
+			conn, err := listen.Accept()
+			if err != nil {
+				fmt.Printf("rpc accept err: %s\n", err)
+				continue
+			}
+			go rpc.ServeConn(conn)
+		}
+	}()
 }
 
 func main() {
@@ -283,6 +301,12 @@ func main() {
 		switch cmd {
 		case "Lookup":
 			filename := parts[1]
+			var needDecyption bool
+			var password string
+			if len(parts) >= 3 {
+				needDecyption = true
+				password = parts[2]
+			}
 			fileId := hash(filename)
 			fileChordDTO := c.find(fileId, &ChordDTO{Id: c.Id, IpAddr: c.IpAddr})
 
@@ -292,14 +316,55 @@ func main() {
 				Name: filename,
 			}, fileReply)
 			if !ok || !fileReply.ReadSuccess {
-				fmt.Printf("Lookup file, name: %s, chord node id: %v, chord node ipAddr: %s, content read fail.\n", filename, fileChordDTO.Id, fileChordDTO.IpAddr)
+				// fault-tolerance: read successors node
+				getSuccessorListReply := &GetSuccessorListReply{}
+				ok = call(fileChordDTO.IpAddr, "Chord.GetSuccessorList", &GetSuccessorListArgs{}, getSuccessorListReply)
+				if ok {
+					var readOk bool
+					for i := 0; i < len(getSuccessorListReply.Successors); i++ {
+						readOk = call(getSuccessorListReply.Successors[i].IpAddr, "Chord.GetFileContent", &GetFileContentArgs{
+							Name: filename,
+						}, fileReply)
+						if readOk {
+							break
+						}
+					}
+					if readOk {
+						var content []byte
+						if needDecyption {
+							content = DecryptFileContent(fileReply.Content, password)
+						} else {
+							content = fileReply.Content
+						}
+						fmt.Printf("Lookup file, name: %s, chord node id: %v, chord node ipAddr: %s, content: %s\n", filename, fileChordDTO.Id, fileChordDTO.IpAddr, content)
+
+					} else {
+						fmt.Printf("Lookup file, name: %s, chord node id: %v, chord node ipAddr: %s, content read fail.\n", filename, fileChordDTO.Id, fileChordDTO.IpAddr)
+					}
+
+				}
+				//fmt.Printf("Lookup file, name: %s, chord node id: %v, chord node ipAddr: %s, content read fail.\n", filename, fileChordDTO.Id, fileChordDTO.IpAddr)
 			} else {
-				fmt.Printf("Lookup file, name: %s, chord node id: %v, chord node ipAddr: %s, content: %s\n", filename, fileChordDTO.Id, fileChordDTO.IpAddr, fileReply.Content)
+				var content []byte
+				if needDecyption {
+					content = DecryptFileContent(fileReply.Content, password)
+				} else {
+					content = fileReply.Content
+				}
+				fmt.Printf("Lookup file, name: %s, chord node id: %v, chord node ipAddr: %s, content: %s\n", filename, fileChordDTO.Id, fileChordDTO.IpAddr, content)
 
 			}
 
 		case "StoreFile":
 			filename := parts[1]
+			// for encryption
+			needEncryption := false
+			var password string
+			if len(parts) >= 3 {
+				needEncryption = true
+				password = parts[2]
+			}
+
 			openFile, err := os.Open(filename)
 			if err != nil {
 				fmt.Printf("open file [%s] failed err: %v\n", filename, err)
@@ -310,6 +375,11 @@ func main() {
 			if err != nil {
 				fmt.Printf("read file [%s] failed err: %v\n", filename, err)
 				continue
+			}
+
+			// [option] encryption
+			if needEncryption {
+				fileContent = EncryptFileContent(fileContent, password)
 			}
 
 			fileId := hash(filename)
@@ -325,6 +395,19 @@ func main() {
 			} else {
 				fmt.Printf("Save file success. chord node id: %v, chord node ipAddr: %s\n", fileChordDTO.Id, fileChordDTO.IpAddr)
 			}
+
+			// fault-tolerant: save file to its successor node
+			getSuccessorListReply := &GetSuccessorListReply{}
+			ok = call(fileChordDTO.IpAddr, "Chord.GetSuccessorList", &GetSuccessorListArgs{}, getSuccessorListReply)
+			if ok {
+				for i := 0; i < len(getSuccessorListReply.Successors); i++ {
+					call(getSuccessorListReply.Successors[i].IpAddr, "Chord.SaveFile", &SaveFileArgs{
+						Name:    filename,
+						Content: fileContent,
+					}, &SaveFileReply{})
+				}
+			}
+
 		case "PrintState":
 			c.Print()
 		default:

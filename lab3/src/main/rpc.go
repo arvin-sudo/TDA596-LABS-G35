@@ -156,7 +156,7 @@ type GetFileContentArgs struct {
 }
 type GetFileContentReply struct {
 	ReadSuccess bool
-	Content     string
+	Content     []byte
 }
 
 func (c *Chord) GetFileContent(args *GetFileContentArgs, reply *GetFileContentReply) error {
@@ -174,7 +174,7 @@ func (c *Chord) GetFileContent(args *GetFileContentArgs, reply *GetFileContentRe
 	}
 	file.Close()
 
-	reply.Content = string(content)
+	reply.Content = content
 	reply.ReadSuccess = true
 	return nil
 }
