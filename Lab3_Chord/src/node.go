@@ -396,7 +396,7 @@ func (n *Node) findSuccessorIterative(id *big.Int) (*NodeInfo, error) {
 }
 
 // find which node is responsible for a given key
-func (n *Node) Lookup(key string) (*NodeInfo, error) {
+func (n *Node) Lookup(key string, password string) (*NodeInfo, error) {
 	// hash the key to get ID
 	id := Hash(key)
 
@@ -412,12 +412,28 @@ func (n *Node) Lookup(key string) (*NodeInfo, error) {
 
 	// fetch the data from the successor node
 	var getReply GetReply
+
 	err = CallNode(successor.IP, "Node.Get", &GetArgs{Key: key}, &getReply)
 	if err != nil {
 		fmt.Printf("Warning: Failed to retrieve data from Node %s: %v", successor.IP, err)
 	} else if getReply.Found {
+		// decrypt file if password provided (SECURITY FEATURE)
+		var displayContent string
+		if password != "" {
+			decrypted := DecryptFileContent([]byte(getReply.Value), password)
+			if decrypted == nil {
+				fmt.Printf("ERROR: Decryption Failed (wrong password or corrupted data)\n")
+				fmt.Printf("=========================\n")
+				return successor, nil
+			}
+			displayContent = string(decrypted)
+			fmt.Printf("File decrypted successfully with AES-256-GCM\n")
+		} else {
+			displayContent = getReply.Value
+		}
+
 		fmt.Printf("===== FILE CONTENT ======\n")
-		fmt.Printf("%s\n", getReply.Value)
+		fmt.Printf("%s\n", displayContent)
 		fmt.Printf("=========================\n")
 	} else {
 		fmt.Printf("File: '%s' not found on Node %s\n", key, successor.IP)
@@ -427,7 +443,7 @@ func (n *Node) Lookup(key string) (*NodeInfo, error) {
 }
 
 // storefile - read a file from disk and store it in the chord ring
-func (n *Node) StoreFile(filename string) error {
+func (n *Node) StoreFile(filename string, password string) error {
 	// step 1: read file from disk
 	content, err := os.ReadFile(filename)
 	if err != nil {
@@ -436,11 +452,24 @@ func (n *Node) StoreFile(filename string) error {
 
 	fmt.Printf("Read File: '%s' (%d bytes)\n", filename, len(content))
 
-	// step 2: hash the filename to get ID
+	// step 2: encrypt file if password provided (SECURITY FEATURE)
+	var dataToStore string
+	if password != "" {
+		encrypted := EncryptFileContent(content, password)
+		if encrypted == nil {
+			return fmt.Errorf("Encryption failed for file '%s'", filename)
+		}
+		dataToStore = string(encrypted)
+		fmt.Printf("File encrypted with AES-256-GCM (%d bytes)\n", len(encrypted))
+	} else {
+		dataToStore = string(content)
+	}
+
+	// step 3: hash the filename to get ID
 	id := Hash(filename)
 	fmt.Printf("File: '%s' Hashed to ID: (%s)\n", filename, IDToString(id))
 
-	// step 3: find which node is responsible for this ID
+	// step 4: find which node is responsible for this ID
 	successor, err := n.findSuccessorIterative(id)
 	if err != nil {
 		return fmt.Errorf("Failed to find Successor for File '%s': %v", filename, err)
@@ -448,10 +477,10 @@ func (n *Node) StoreFile(filename string) error {
 
 	fmt.Printf("File: '%s' will be stored at Node IP: %s (ID: %s)\n", filename, successor.IP, IDToString(successor.ID))
 
-	// step 4: send the file to that node using PUT RPC
+	// step 5: send the file to that node using PUT RPC
 	err = CallNode(successor.IP, "Node.Put", &PutArgs{
 		Key:   filename,
-		Value: string(content),
+		Value: dataToStore,
 	}, &PutReply{})
 
 	if err != nil {
@@ -657,8 +686,8 @@ func (n *Node) FixFingers(next int) int {
 func (n *Node) CommandLoop() {
 	scanner := bufio.NewScanner(os.Stdin)
 	fmt.Println("Available Commands:")
-	fmt.Println(">	Lookup <key>")
-	fmt.Println(">	StoreFile <filename>")
+	fmt.Println(">	Lookup <key> [password]")
+	fmt.Println(">	StoreFile <filename> [password]")
 	fmt.Println(">	PrintState")
 	fmt.Println(">	Help")
 	fmt.Println(">	Exit")
@@ -685,12 +714,16 @@ func (n *Node) CommandLoop() {
 		case "lookup":
 			// handle lookup cmd
 			if len(parts) < 2 {
-				fmt.Println("Correct Usage: Lookup <key>")
+				fmt.Println("Correct Usage: Lookup <key> [password]")
 				continue
 			}
 
 			key := parts[1]
-			_, err := n.Lookup(key)
+			password := ""
+			if len(parts) >= 3 {
+				password = parts[2]
+			}
+			_, err := n.Lookup(key, password)
 			if err != nil {
 				fmt.Printf("Lookup Failed: %v\n", err)
 			}
@@ -702,12 +735,16 @@ func (n *Node) CommandLoop() {
 		case "storefile":
 			// handle storefile cmd
 			if len(parts) < 2 {
-				fmt.Println("Correct Usage: StoreFile <filename>")
+				fmt.Println("Correct Usage: StoreFile <filename> [password]")
 				continue
 			}
 
 			filename := parts[1]
-			err := n.StoreFile(filename)
+			password := ""
+			if len(parts) >= 3 {
+				password = parts[2]
+			}
+			err := n.StoreFile(filename, password)
 			if err != nil {
 				fmt.Printf("StoreFile Failed: %v\n", err)
 			}
