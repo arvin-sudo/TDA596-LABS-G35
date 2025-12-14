@@ -32,11 +32,23 @@ type NodeInfo struct {
 }
 
 // create new node
-func NewNode(ip string, port int, successorCount int) *Node {
+func NewNode(ip string, port int, successorCount int, idOverride string) *Node {
 	ipAddress := fmt.Sprintf("%s:%d", ip, port)
 
+	// determine node ID - use override if provided, otherwise hash IP:PORT
+	var nodeID *big.Int
+	if idOverride != "" {
+		// parse hex string to big.Int
+		nodeID = new(big.Int)
+		nodeID.SetString(idOverride, 16)
+		fmt.Printf("Using ID Override: %s (ID: %s)\n", idOverride, IDToString(nodeID))
+	} else {
+		// normal case: hash IP:PORT
+		nodeID = Hash(ipAddress)
+	}
+
 	node := &Node{
-		ID:             Hash(ipAddress),
+		ID:             nodeID,
 		IP:             ipAddress,
 		Successor:      make([]*NodeInfo, 0, successorCount),
 		Predecessor:    nil,
@@ -191,6 +203,40 @@ func (n *Node) ReceiveKeys(args *ReceiveKeysArgs, reply *ReceiveKeysReply) error
 	return nil
 }
 
+// TransferKeys - rpc method to transfer keys that belong to the requesting node
+// Called during join: new node asks its successor for keys it should own
+func (n *Node) TransferKeys(args *TransferKeysArgs, reply *TransferKeysReply) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	reply.Keys = make(map[string]string)
+	targetID := args.TargetID
+
+	// find which keys should be transferred to the new node
+	// transfer all keys where hash(key) <= targetID
+	keysToRemove := make([]string, 0)
+
+	for key, value := range n.Bucket {
+		keyID := Hash(key)
+
+		// if keys hash <= targetID, it belongs to the new node
+		if keyID.Cmp(targetID) <= 0 {
+			reply.Keys[key] = value
+			keysToRemove = append(keysToRemove, key)
+			fmt.Printf("TransferKeys: Will transfer [%s] (ID: %s) to node %s\n",
+				key, IDToString(keyID), IDToString(targetID))
+		}
+	}
+
+	// remove transferred keys from our bucket
+	for _, key := range keysToRemove {
+		delete(n.Bucket, key)
+	}
+
+	fmt.Printf("TransferKeys: Transferred %d keys to new node\n", len(reply.Keys))
+	return nil
+}
+
 // create a new chord ring (one alone node)
 func (n *Node) Create() {
 	n.mu.Lock()
@@ -293,6 +339,26 @@ func (n *Node) Join(bootstrapNode string) error {
 		n.FingerTable[i] = firstSuccessor
 	}
 	n.mu.Unlock()
+
+	// step 4: request keys from successor that now belong to us
+	// we are responsible for keys with hash <= our ID
+	var transferReply TransferKeysReply
+	err = CallNode(firstSuccessor.IP, "Node.TransferKeys", &TransferKeysArgs{
+		TargetID: n.ID,
+	}, &transferReply)
+
+	if err != nil {
+		fmt.Printf("Warning: Could not transfer keys from Successor %s: %v\n", firstSuccessor.IP, err)
+	} else if len(transferReply.Keys) > 0 {
+		// store received keys in our bucket
+		n.mu.Lock()
+		for key, value := range transferReply.Keys {
+			n.Bucket[key] = value
+			fmt.Printf("Join: Received key [%s] from Successor %s\n", key, firstSuccessor.IP)
+		}
+		n.mu.Unlock()
+		fmt.Printf("Join: Successfully received %d keys from Successor %s\n", len(transferReply.Keys), firstSuccessor.IP)
+	}
 
 	fmt.Printf("Joined Chord Ring by Node: %s\n", bootstrapNode)
 	fmt.Printf("My Successor's Node IP is: %s\n", firstSuccessor.IP)

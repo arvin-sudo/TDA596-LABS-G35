@@ -13,7 +13,7 @@ func main() {
 	config := ParseArgs()
 
 	// create node
-	node := NewNode(config.IP, config.PORT, config.SuccessorCount)
+	node := NewNode(config.IP, config.PORT, config.SuccessorCount, config.IDOverride)
 
 	// start RPC server
 	err := node.StartRPCServer()

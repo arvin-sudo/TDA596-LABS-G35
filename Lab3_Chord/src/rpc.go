@@ -68,3 +68,12 @@ type ReceiveKeysArgs struct {
 type ReceiveKeysReply struct {
 	Success bool
 }
+
+// TransferKeys - request keys in a specific range from a node
+type TransferKeysArgs struct {
+	TargetID *big.Int // the ID of the requesting node
+}
+
+type TransferKeysReply struct {
+	Keys map[string]string // key-value pairs that belong to requester
+}
