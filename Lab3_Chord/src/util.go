@@ -3,9 +3,12 @@
 package main
 
 import (
+	"bufio"
 	"crypto/sha1"
+	"crypto/tls"
 	"fmt"
 	"math/big"
+	"net/http"
 	"net/rpc"
 )
 
@@ -13,6 +16,10 @@ import (
 const (
 	KeySize = sha1.Size * 8 // 160bits
 )
+
+// Global variable to track if TLS is enabled for this process
+// Set by main() and used by CallNode() to connect to remote nodes
+var GlobalUseTLS bool = false
 
 /*
  In Chord each node has a unique ID (160-bit number from SHA-1).
@@ -35,11 +42,42 @@ func IDToString(id *big.Int) string {
 	return fmt.Sprintf("%x", id)
 }
 
-// Call RPC method on another node to verify they communicate
+// Call RPC method on another node - auto uses TLS if GlobalUseTLS is true
 func CallNode(ip string, method string, args interface{}, reply interface{}) error {
-	client, err := rpc.DialHTTP("tcp", ip)
-	if err != nil {
-		return err
+	var client *rpc.Client
+	var err error
+
+	if GlobalUseTLS {
+		// TLS Mode: connect with TLS and skip certificate verification
+		// (we use self-signed certs, so cant verify them against a CA)
+		tlsConfig := &tls.Config{
+			InsecureSkipVerify: true, // accept self-signed certificates
+		}
+
+		conn, err := tls.Dial("tcp", ip, tlsConfig)
+		if err != nil {
+			return fmt.Errorf("TLS dial failed: %v", err)
+		}
+
+		// manually do HTTP CONNECT handshake for RPC over TLS
+		io := bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn))
+		io.WriteString("CONNECT " + rpc.DefaultRPCPath + " HTTP/1.0\n\n")
+		io.Flush()
+
+		// read response
+		resp, err := http.ReadResponse(io.Reader, &http.Request{Method: "CONNECT"})
+		if err == nil && resp.Status == "200 "+rpc.DefaultRPCPath {
+			client = rpc.NewClient(conn)
+		} else {
+			conn.Close()
+			return fmt.Errorf("unexpected HTTP response: %v", resp.Status)
+		}
+	} else {
+		// Plain TCP Mode: Standard HTTP RPC
+		client, err = rpc.DialHTTP("tcp", ip)
+		if err != nil {
+			return err
+		}
 	}
 	defer client.Close()
 

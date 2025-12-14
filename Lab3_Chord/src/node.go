@@ -4,6 +4,7 @@ package main
 
 import (
 	"bufio"
+	"crypto/tls"
 	"fmt"
 	"math/big"
 	"net"
@@ -23,6 +24,8 @@ type Node struct {
 	Bucket         map[string]string // Data-storage
 	FingerTable    []*NodeInfo       // make Chord Lookup faster from O(N) to O(Log n)
 	SuccessorCount int               // number of successors to keep track of
+	UseTLS         bool              // whether to use TLS for RPC communication
+	TLSCert        tls.Certificate   // self-signed TLS certificate
 }
 
 // NodeInfo = information about a remote node
@@ -32,7 +35,7 @@ type NodeInfo struct {
 }
 
 // create new node
-func NewNode(ip string, port int, successorCount int, idOverride string) *Node {
+func NewNode(ip string, port int, successorCount int, idOverride string, useTLS bool) *Node {
 	ipAddress := fmt.Sprintf("%s:%d", ip, port)
 
 	// determine node ID - use override if provided, otherwise hash IP:PORT
@@ -47,6 +50,21 @@ func NewNode(ip string, port int, successorCount int, idOverride string) *Node {
 		nodeID = Hash(ipAddress)
 	}
 
+	// generate TLS certificate if TLS is enabled
+	var tlsCert tls.Certificate
+	if useTLS {
+		fmt.Println("TLS: Generating self-signed certificate...")
+		cert, err := GenerateSelfSignedCert(ipAddress)
+		if err != nil {
+			fmt.Printf("TLS: Failed to generate certificate: %v\n", err)
+			fmt.Println("TLS: Falling back to non-TLS mode")
+			useTLS = false
+		} else {
+			tlsCert = cert
+			fmt.Println("TLS: Certificate generated successfully")
+		}
+	}
+
 	node := &Node{
 		ID:             nodeID,
 		IP:             ipAddress,
@@ -55,6 +73,8 @@ func NewNode(ip string, port int, successorCount int, idOverride string) *Node {
 		Bucket:         make(map[string]string),
 		FingerTable:    make([]*NodeInfo, KeySize+1),
 		SuccessorCount: successorCount,
+		UseTLS:         useTLS,
+		TLSCert:        tlsCert,
 	}
 
 	return node
@@ -66,21 +86,36 @@ func (n *Node) StartRPCServer() error {
 	rpc.Register(n)
 	rpc.HandleHTTP()
 
-	// Listen on our address
-	listener, err := net.Listen("tcp", n.IP)
-	if err != nil {
-		return err
+	var listener net.Listener
+	var err error
+
+	// choose between TLS and plain TCP based on UseTLS flag
+	if n.UseTLS {
+		// TLS Mode: create TLS listener with self-signed certificate
+		tlsConfig := &tls.Config{
+			Certificates: []tls.Certificate{n.TLSCert},
+			MinVersion:   tls.VersionTLS12,
+		}
+		listener, err = tls.Listen("tcp", n.IP, tlsConfig)
+		if err != nil {
+			return fmt.Errorf("TLS: Failed to start TLS listener: %v", err)
+		}
+		fmt.Printf("RPC Server listening on IP: %s (TLS ENABLED)\n", n.IP)
+	} else {
+		// Plain TCP Mode: standard non-encrypted listener
+		listener, err = net.Listen("tcp", n.IP)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("RPC Server listening on IP: %s\n", n.IP)
 	}
 
-	// Start serving in goroutine
+	// start serving in goroutine (same for both TLS and non-TLS)
 	go func() {
 		if err := http.Serve(listener, nil); err != nil {
 			fmt.Printf("RPC Server error: %v\n", err)
 		}
 	}()
-
-	// Server is now listening (net.Listen completed successfully)
-	fmt.Printf("RPC Server listening on IP: %s\n", n.IP)
 
 	return nil
 }

@@ -26,6 +26,9 @@ type Config struct {
 
 	// optional ID override
 	IDOverride string // -i
+
+	// optional TLS enablement
+	UseTLS bool // --tls
 }
 
 func ParseArgs() *Config {
@@ -45,11 +48,13 @@ func ParseArgs() *Config {
 
 	flag.StringVar(&config.IDOverride, "i", "", "Optional ID Override (40 hex char)")
 
+	flag.BoolVar(&config.UseTLS, "tls", false, "Enable TLS for secure RPC communication")
+
 	flag.Parse()
 
 	// simple validate
 	if config.IP == "" || config.PORT == 0 {
-		fmt.Println("Usage: chord -a <address> -p <port> [--ja <join-address> --jp <join-port>]")
+		fmt.Println("Usage: Chord -a <address> -p <port> [--ja <join-address> --jp <join-port>]")
 		os.Exit(1)
 	}
 

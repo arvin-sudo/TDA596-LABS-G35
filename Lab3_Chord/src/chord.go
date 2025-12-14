@@ -12,8 +12,11 @@ func main() {
 
 	config := ParseArgs()
 
+	// set global TLS flag for CallNode to use
+	GlobalUseTLS = config.UseTLS
+
 	// create node
-	node := NewNode(config.IP, config.PORT, config.SuccessorCount, config.IDOverride)
+	node := NewNode(config.IP, config.PORT, config.SuccessorCount, config.IDOverride, config.UseTLS)
 
 	// start RPC server
 	err := node.StartRPCServer()
