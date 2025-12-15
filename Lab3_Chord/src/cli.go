@@ -90,19 +90,31 @@ func ParseArgs() *Config {
 		os.Exit(1)
 	}
 
-	// validate ID override format (if provided, must be 40 hex chars)
+	// validate ID override format
 	if config.IDOverride != "" {
-		if len(config.IDOverride) != 40 {
-			fmt.Println("Error: -i must be exactly 40 hex characters")
-			os.Exit(1)
+		isHex := len(config.IDOverride) == 40
+		if isHex {
+			for _, c := range config.IDOverride {
+				if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+					isHex = false
+					break
+				}
+			}
 		}
 
-		// check if all characters are hex [0-9a-fA-F]
+		isDecimal := true
 		for _, c := range config.IDOverride {
-			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
-				fmt.Println("Error: -i must contain only hex characters [0-9a-fA-F]")
-				os.Exit(1)
+			if c < '0' || c > '9' {
+				isDecimal = false
+				break
 			}
+		}
+
+		if !isHex && !isDecimal {
+			fmt.Println("Error: -i must be either:")
+			fmt.Println("  - 40 hex characters (e.g., '5d41402abc4b2a76b9719d911017c592')")
+			fmt.Println("  - Decimal number (e.g., '1', '200', '999999')")
+			os.Exit(1)
 		}
 	}
 

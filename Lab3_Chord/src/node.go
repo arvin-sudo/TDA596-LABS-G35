@@ -41,10 +41,19 @@ func NewNode(ip string, port int, successorCount int, idOverride string, useTLS 
 	// determine node ID - use override if provided, otherwise hash IP:PORT
 	var nodeID *big.Int
 	if idOverride != "" {
-		// parse hex string to big.Int
+		// parse as decimal first, then hex
 		nodeID = new(big.Int)
-		nodeID.SetString(idOverride, 16)
-		fmt.Printf("Using ID Override: %s (ID: %s)\n", idOverride, IDToString(nodeID))
+
+		if len(idOverride) == 40 {
+			_, success := nodeID.SetString(idOverride, 16)
+			if !success {
+				nodeID.SetString(idOverride, 10)
+			}
+		} else {
+			nodeID.SetString(idOverride, 10)
+		}
+
+		fmt.Printf("Using ID Override: %s (Parsed ID: %s)\n", idOverride, IDToString(nodeID))
 	} else {
 		// normal case: hash IP:PORT
 		nodeID = Hash(ipAddress)
@@ -98,7 +107,7 @@ func (n *Node) StartRPCServer() error {
 		}
 		listener, err = tls.Listen("tcp", n.IP, tlsConfig)
 		if err != nil {
-			return fmt.Errorf("TLS: Failed to start TLS listener: %v", err)
+			return fmt.Errorf("failed to start TLS listener: %v", err)
 		}
 		fmt.Printf("RPC Server listening on IP: %s (TLS ENABLED)\n", n.IP)
 	} else {
@@ -342,7 +351,7 @@ func (n *Node) Join(bootstrapNode string) error {
 	var findReply FindSuccessorReply
 	err := CallNode(bootstrapNode, "Node.FindSuccessor", &FindSuccessorArgs{ID: n.ID}, &findReply)
 	if err != nil {
-		return fmt.Errorf("Failed to contact bootstrap node: %v", err)
+		return fmt.Errorf("failed to contact bootstrap node: %v", err)
 	}
 
 	firstSuccessor := findReply.Node
@@ -412,7 +421,7 @@ func (n *Node) findSuccessorIterative(id *big.Int) (*NodeInfo, error) {
 		var reply FindSuccessorReply
 		err := CallNode(current.IP, "Node.FindSuccessor", &FindSuccessorArgs{ID: id}, &reply)
 		if err != nil {
-			return nil, fmt.Errorf("Failed to contact Node %s: %v", current.IP, err)
+			return nil, fmt.Errorf("failed to contact node %s: %v", current.IP, err)
 		}
 
 		// if the reply is between current node and reply.successor
@@ -510,7 +519,7 @@ func (n *Node) StoreFile(filename string, password string) error {
 	// step 1: read file from disk
 	content, err := os.ReadFile(filename)
 	if err != nil {
-		return fmt.Errorf("Failed to read file '%s': %v", filename, err)
+		return fmt.Errorf("failed to read file '%s': %v", filename, err)
 	}
 
 	fmt.Printf("Read File: '%s' (%d bytes)\n", filename, len(content))
@@ -520,7 +529,7 @@ func (n *Node) StoreFile(filename string, password string) error {
 	if password != "" {
 		encrypted := EncryptFileContent(content, password)
 		if encrypted == nil {
-			return fmt.Errorf("Encryption failed for file '%s'", filename)
+			return fmt.Errorf("encryption failed for file '%s'", filename)
 		}
 		dataToStore = string(encrypted)
 		fmt.Printf("File encrypted with AES-256-GCM (%d bytes)\n", len(encrypted))
@@ -535,7 +544,7 @@ func (n *Node) StoreFile(filename string, password string) error {
 	// step 4: find which node is responsible for this ID
 	successor, err := n.findSuccessorIterative(id)
 	if err != nil {
-		return fmt.Errorf("Failed to find Successor for File '%s': %v", filename, err)
+		return fmt.Errorf("failed to find Successor for File '%s': %v", filename, err)
 	}
 
 	fmt.Printf("File: '%s' will be stored at Node IP: %s (ID: %s)\n", filename, successor.IP, IDToString(successor.ID))
@@ -547,7 +556,7 @@ func (n *Node) StoreFile(filename string, password string) error {
 	}, &PutReply{})
 
 	if err != nil {
-		return fmt.Errorf("Failed to store File '%s' at Node IP: %s: %v", filename, successor.IP, err)
+		return fmt.Errorf("failed to store File '%s' at Node IP: %s: %v", filename, successor.IP, err)
 	}
 
 	fmt.Printf("PRIMARY: File '%s' stored on Node IP: %s\n", filename, successor.IP)
