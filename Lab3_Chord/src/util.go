@@ -3,12 +3,10 @@
 package main
 
 import (
-	"bufio"
 	"crypto/sha1"
 	"crypto/tls"
 	"fmt"
 	"math/big"
-	"net/http"
 	"net/rpc"
 )
 
@@ -48,8 +46,7 @@ func CallNode(ip string, method string, args interface{}, reply interface{}) err
 	var err error
 
 	if GlobalUseTLS {
-		// TLS Mode: connect with TLS and skip certificate verification
-		// (we use self-signed certs, so cant verify them against a CA)
+		// TLS Mode: connect with TLS and use direct RPC - we use self-signed certs, so skip verification
 		tlsConfig := &tls.Config{
 			InsecureSkipVerify: true, // accept self-signed certificates
 		}
@@ -59,19 +56,8 @@ func CallNode(ip string, method string, args interface{}, reply interface{}) err
 			return fmt.Errorf("TLS dial failed: %v", err)
 		}
 
-		// manually do HTTP CONNECT handshake for RPC over TLS
-		io := bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn))
-		io.WriteString("CONNECT " + rpc.DefaultRPCPath + " HTTP/1.0\n\n")
-		io.Flush()
-
-		// read response
-		resp, err := http.ReadResponse(io.Reader, &http.Request{Method: "CONNECT"})
-		if err == nil && resp.Status == "200 "+rpc.DefaultRPCPath {
-			client = rpc.NewClient(conn)
-		} else {
-			conn.Close()
-			return fmt.Errorf("unexpected HTTP response: %v", resp.Status)
-		}
+		// Direct RPC over TLS (no HTTP handshake needed)
+		client = rpc.NewClient(conn)
 	} else {
 		// Plain TCP Mode: Standard HTTP RPC
 		client, err = rpc.DialHTTP("tcp", ip)

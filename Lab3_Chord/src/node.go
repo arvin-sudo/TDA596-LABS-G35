@@ -93,7 +93,6 @@ func NewNode(ip string, port int, successorCount int, idOverride string, useTLS 
 func (n *Node) StartRPCServer() error {
 	// Register this node for RPC
 	rpc.Register(n)
-	rpc.HandleHTTP()
 
 	var listener net.Listener
 	var err error
@@ -110,21 +109,34 @@ func (n *Node) StartRPCServer() error {
 			return fmt.Errorf("failed to start TLS listener: %v", err)
 		}
 		fmt.Printf("RPC Server listening on IP: %s (TLS ENABLED)\n", n.IP)
+
+		// TLS Mode: handle each connection directly with ServeConn
+		go func() {
+			for {
+				conn, err := listener.Accept()
+				if err != nil {
+					fmt.Printf("RPC Server accept error: %v\n", err)
+					continue
+				}
+				go rpc.ServeConn(conn)
+			}
+		}()
 	} else {
-		// Plain TCP Mode: standard non-encrypted listener
+		// Plain TCP Mode: use HTTP-based RPC
+		rpc.HandleHTTP()
 		listener, err = net.Listen("tcp", n.IP)
 		if err != nil {
 			return err
 		}
 		fmt.Printf("RPC Server listening on IP: %s\n", n.IP)
-	}
 
-	// start serving in goroutine (same for both TLS and non-TLS)
-	go func() {
-		if err := http.Serve(listener, nil); err != nil {
-			fmt.Printf("RPC Server error: %v\n", err)
-		}
-	}()
+		// Non-TLS Mode: Use http.Serve for HTTP-based RPC
+		go func() {
+			if err := http.Serve(listener, nil); err != nil {
+				fmt.Printf("RPC Server error: %v\n", err)
+			}
+		}()
+	}
 
 	return nil
 }
