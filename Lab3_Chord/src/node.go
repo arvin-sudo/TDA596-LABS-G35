@@ -449,30 +449,58 @@ func (n *Node) Lookup(key string, password string) (*NodeInfo, error) {
 	var getReply GetReply
 
 	err = CallNode(successor.IP, "Node.Get", &GetArgs{Key: key}, &getReply)
-	if err != nil {
-		fmt.Printf("Warning: Failed to retrieve data from Node %s: %v", successor.IP, err)
-	} else if getReply.Found {
-		// decrypt file if password provided (SECURITY FEATURE)
-		var displayContent string
-		if password != "" {
-			decrypted := DecryptFileContent([]byte(getReply.Value), password)
-			if decrypted == nil {
-				fmt.Printf("ERROR: Decryption Failed (wrong password or corrupted data)\n")
-				fmt.Printf("=========================\n")
-				return successor, nil
+	if err != nil || !getReply.Found {
+		// FAULT-TOLERANCE: Primary node failed or file not found, try successors
+		fmt.Printf("Warning: Failed to retrieve from Primary Node: %s: %v\n", successor.IP, err)
+		fmt.Printf("Attempting failover to backup nodes...\n")
+
+		// get primary nodes successor list
+		var listReply GetSuccessorListReply
+		err = CallNode(successor.IP, "Node.GetSuccessorList", &EmptyArgs{}, &listReply)
+		if err == nil {
+			// try each successor until we find the file
+			for i := 0; i < len(listReply.Successors); i++ {
+				backupNode := listReply.Successors[i]
+
+				// skip if backup is ourselves
+				if backupNode.IP == n.IP {
+					continue
+				}
+
+				fmt.Printf("Trying backup node %s...\n", backupNode.IP)
+				err = CallNode(backupNode.IP, "Node.Get", &GetArgs{Key: key}, &getReply)
+				if err == nil && getReply.Found {
+					fmt.Printf("SUCCESS: Found file on backup node %s\n", backupNode.IP)
+					break
+				}
 			}
-			displayContent = string(decrypted)
-			fmt.Printf("File decrypted successfully with AES-256-GCM\n")
-		} else {
-			displayContent = getReply.Value
 		}
 
-		fmt.Printf("===== FILE CONTENT ======\n")
-		fmt.Printf("%s\n", displayContent)
-		fmt.Printf("=========================\n")
-	} else {
-		fmt.Printf("File: '%s' not found on Node %s\n", key, successor.IP)
+		// if still not found after trying all backups
+		if !getReply.Found {
+			fmt.Printf("File: '%s' not found on primary or any backup nodes\n", key)
+			return successor, nil
+		}
 	}
+
+	// decrypt file if password provided (SECURITY FEATURE)
+	var displayContent string
+	if password != "" {
+		decrypted := DecryptFileContent([]byte(getReply.Value), password)
+		if decrypted == nil {
+			fmt.Printf("ERROR: Decryption Failed (wrong password or corrupted data)\n")
+			fmt.Printf("=========================\n")
+			return successor, nil
+		}
+		displayContent = string(decrypted)
+		fmt.Printf("File decrypted successfully with AES-256-GCM\n")
+	} else {
+		displayContent = getReply.Value
+	}
+
+	fmt.Printf("===== FILE CONTENT ======\n")
+	fmt.Printf("%s\n", displayContent)
+	fmt.Printf("=========================\n")
 
 	return successor, nil
 }
@@ -522,7 +550,43 @@ func (n *Node) StoreFile(filename string, password string) error {
 		return fmt.Errorf("Failed to store File '%s' at Node IP: %s: %v", filename, successor.IP, err)
 	}
 
-	fmt.Printf("SUCCESS: File '%s' stored on Node IP: %s\n", filename, successor.IP)
+	fmt.Printf("PRIMARY: File '%s' stored on Node IP: %s\n", filename, successor.IP)
+
+	// step 6: FAULT-TOLERANCE - replicate file to successors successors
+	var listReply GetSuccessorListReply
+
+	err = CallNode(successor.IP, "Node.GetSuccessorList", &EmptyArgs{}, &listReply)
+	if err != nil {
+		fmt.Printf("Warning: Could not get Successor list from: %s: %v\n", successor.IP, err)
+		fmt.Printf("File stored on primary node only (no replication)\n")
+		return nil
+	}
+
+	// step 7: store file on all backup successors (for fault-tolerance)
+	replicaCount := 0
+	for i := 0; i < len(listReply.Successors); i++ {
+		backupNode := listReply.Successors[i]
+
+		// skip if backup is ourselves (avoid storing on same node twice)
+		if backupNode.IP == n.IP {
+			continue
+		}
+
+		err = CallNode(backupNode.IP, "Node.Put", &PutArgs{
+			Key:   filename,
+			Value: dataToStore,
+		}, &PutReply{})
+
+		if err != nil {
+			fmt.Printf("Warning: Failed to replicate to backup node %s: %v\n", backupNode.IP, err)
+		} else {
+			replicaCount++
+			fmt.Printf("REPLICA: File '%s' replicated to Node IP: %s\n", filename, backupNode.IP)
+		}
+	}
+
+	fmt.Printf("SUCCESS: File '%s' stored on %d nodes (1 primary + %d replicas)\n",
+		filename, replicaCount+1, replicaCount)
 
 	return nil
 }
@@ -717,6 +781,42 @@ func (n *Node) FixFingers(next int) int {
 	return next
 }
 
+// GracefulShutdown transfers all keys to successor before exiting
+func (n *Node) GracefulShutdown() {
+	fmt.Println("Starting graceful shutdown...")
+
+	// check if we have a successor
+	n.mu.RLock()
+	hasSuccessor := len(n.Successor) > 0 && n.Successor[0].IP != n.IP
+	successorIP := ""
+	if hasSuccessor {
+		successorIP = n.Successor[0].IP
+	}
+
+	bucketCopy := make(map[string]string)
+	for k, v := range n.Bucket {
+		bucketCopy[k] = v
+	}
+	n.mu.RUnlock()
+
+	// if we have a successor, transfer all data
+	if hasSuccessor && len(bucketCopy) > 0 {
+		fmt.Printf("Transferring %d keys to Successor %s...\n", len(bucketCopy), successorIP)
+
+		err := CallNode(successorIP, "Node.ReceiveKeys", &ReceiveKeysArgs{
+			Keys: bucketCopy,
+		}, &ReceiveKeysReply{})
+
+		if err != nil {
+			fmt.Printf("Warning: Failed to transfer keys to Successor %s: %v\n", successorIP, err)
+		} else {
+			fmt.Printf("Successfully transferred %d keys to Successor %s\n", len(bucketCopy), successorIP)
+		}
+	}
+
+	fmt.Println("Graceful shutdown complete")
+}
+
 // interactive commandloop for user input
 func (n *Node) CommandLoop() {
 	scanner := bufio.NewScanner(os.Stdin)
@@ -787,38 +887,7 @@ func (n *Node) CommandLoop() {
 		case "exit":
 			// handle exit cmd - transfer data to successor before exit
 			fmt.Println("Exiting...")
-
-			// step 1: check if we have a successor
-			n.mu.RLock()
-			hasSuccessor := len(n.Successor) > 0 && n.Successor[0].IP != n.IP
-			successorIP := ""
-			if hasSuccessor {
-				successorIP = n.Successor[0].IP
-			}
-
-			bucketCopy := make(map[string]string)
-			for k, v := range n.Bucket {
-				bucketCopy[k] = v
-			}
-			n.mu.RUnlock()
-
-			// step 2: if we have a successor, transfer all data
-			if hasSuccessor && len(bucketCopy) > 0 {
-				fmt.Printf("Transferring %d keys to Successor %s...\n", len(bucketCopy), successorIP)
-
-				err := CallNode(successorIP, "Node.ReceiveKeys", &ReceiveKeysArgs{
-					Keys: bucketCopy,
-				}, &ReceiveKeysReply{})
-
-				if err != nil {
-					fmt.Printf("Warning: Failed to transfer keys to Successor %s: %v\n", successorIP, err)
-				} else {
-					fmt.Printf("Successfully transferred %d keys to Successor %s\n", len(bucketCopy), successorIP)
-				}
-			}
-
-			// step 3: exit program
-			fmt.Println("Exit Complete")
+			n.GracefulShutdown()
 			os.Exit(0)
 
 		case "help":
