@@ -459,29 +459,30 @@ func (n *Node) Lookup(key string, password string) (*NodeInfo, error) {
 
 	err = CallNode(successor.IP, "Node.Get", &GetArgs{Key: key}, &getReply)
 	if err != nil || !getReply.Found {
-		// FAULT-TOLERANCE: Primary node failed or file not found, try successors
-		fmt.Printf("Warning: Failed to retrieve from Primary Node: %s: %v\n", successor.IP, err)
-		fmt.Printf("Attempting failover to backup nodes...\n")
+		// FAULT-TOLERANCE: Primary node failed or file not found, try our own successor list
+		fmt.Printf("Warning: Failed to retrieve from Primary Node %s: %v\n", successor.IP, err)
+		fmt.Printf("Attempting failover to backup nodes (using our successor list)...\n")
 
-		// get primary nodes successor list
-		var listReply GetSuccessorListReply
-		err = CallNode(successor.IP, "Node.GetSuccessorList", &EmptyArgs{}, &listReply)
-		if err == nil {
-			// try each successor until we find the file
-			for i := 0; i < len(listReply.Successors); i++ {
-				backupNode := listReply.Successors[i]
+		// use OUR OWN successor list
+		n.mu.RLock()
+		successorList := make([]*NodeInfo, len(n.Successor))
+		copy(successorList, n.Successor)
+		n.mu.RUnlock()
 
-				// skip if backup is ourselves
-				if backupNode.IP == n.IP {
-					continue
-				}
+		// try each of our successors until we find the file
+		for i := 0; i < len(successorList); i++ {
+			backupNode := successorList[i]
 
-				fmt.Printf("Trying backup node %s...\n", backupNode.IP)
-				err = CallNode(backupNode.IP, "Node.Get", &GetArgs{Key: key}, &getReply)
-				if err == nil && getReply.Found {
-					fmt.Printf("SUCCESS: Found file on backup node %s\n", backupNode.IP)
-					break
-				}
+			// skip if backup is ourselves OR the already-tried primary
+			if backupNode.IP == n.IP || backupNode.IP == successor.IP {
+				continue
+			}
+
+			fmt.Printf("Trying backup node %s...\n", backupNode.IP)
+			err = CallNode(backupNode.IP, "Node.Get", &GetArgs{Key: key}, &getReply)
+			if err == nil && getReply.Found {
+				fmt.Printf("SUCCESS: Found file on backup node %s\n", backupNode.IP)
+				break
 			}
 		}
 
