@@ -1,0 +1,188 @@
+version: '3.8'
+
+code-comment: >
+  Docker Compose file for setting up a Chord DHT network with 8 nodes.
+  Each node runs in its own container and connects to the first node to join the network.
+
+  to run:
+    docker-compose up --build
+
+services:
+  node1:
+    build: .
+    container_name: chord-node-1
+    hostname: node1
+    networks:
+      - chord_network
+    ports:
+      - "4000:4000"
+    command: >
+      -a node1
+      -p 4000
+      --ts 3000
+      --tff 1000
+      --tcp 3000
+      -r 3
+    stdin_open: true
+    tty: true     
+
+  node2:
+    build: .
+    container_name: chord-node-2
+    hostname: node2
+    networks:
+      - chord_network
+    ports:
+      - "4010:4000"
+    depends_on:
+      - node1
+    command: >
+      -a node2
+      -p 4000
+      --ja node1
+      --jp 4000
+      --ts 3000
+      --tff 1000
+      --tcp 3000
+      -r 3
+    stdin_open: true
+    tty: true
+
+  node3:
+    build: .
+    container_name: chord-node-3
+    hostname: node3
+    networks:
+      - chord_network
+    ports:
+      - "4020:4000"
+    depends_on:
+      - node1
+    command: >
+      -a node3
+      -p 4000
+      --ja node1
+      --jp 4000
+      --ts 3000
+      --tff 1000
+      --tcp 3000
+      -r 3
+    stdin_open: true
+    tty: true
+
+  node4:
+    build: .
+    container_name: chord-node-4
+    hostname: node4
+    networks:
+      - chord_network
+    ports:
+      - "4030:4000"
+    depends_on:
+      - node1
+    command: >
+      -a node4
+      -p 4000
+      --ja node1
+      --jp 4000
+      --ts 3000
+      --tff 1000
+      --tcp 3000
+      -r 3
+    stdin_open: true
+    tty: true
+
+  node5:
+    build: .
+    container_name: chord-node-5
+    hostname: node5
+    networks:
+      - chord_network
+    ports:
+      - "4040:4000"
+    depends_on:
+      - node1
+    command: >
+      -a node5
+      -p 4000
+      --ja node1
+      --jp 4000
+      --ts 3000
+      --tff 1000
+      --tcp 3000
+      -r 3
+    stdin_open: true
+    tty: true
+
+  node6:
+    build: .
+    container_name: chord-node-6
+    hostname: node6
+    networks:
+      - chord_network
+    ports:
+      - "4060:4000"
+    depends_on:
+      - node1
+    command: >
+      -a node6
+      -p 4000
+      --ja node1
+      --jp 4000
+      --ts 3000
+      --tff 1000
+      --tcp 3000
+      -r 3
+    stdin_open: true
+    tty: true
+
+  node7:
+    build: .
+    container_name: chord-node-7
+    hostname: node7
+    networks:
+      - chord_network
+    ports:
+      - "4070:4000"
+    depends_on:
+      - node1
+    command: >
+      -a node7
+      -p 4000
+      --ja node1
+      --jp 4000
+      --ts 3000
+      --tff 1000
+      --tcp 3000
+      -r 3
+    stdin_open: true
+    tty: true
+
+  node8:
+    build: .
+    container_name: chord-node-8
+    hostname: node8
+    networks:
+      - chord_network
+    ports:
+      - "4080:4000"
+    depends_on:
+      - node1
+    command: >
+      -a node8
+      -p 4000
+      --ja node1
+      --jp 4000
+      --ts 3000
+      --tff 1000
+      --tcp 3000
+      -r 3
+    stdin_open: true
+    tty: true
+
+networks:
+  chord_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

@@ -473,8 +473,8 @@ func (n *Node) Lookup(key string, password string) (*NodeInfo, error) {
 		for i := 0; i < len(successorList); i++ {
 			backupNode := successorList[i]
 
-			// skip if backup is ourselves OR the already-tried primary
-			if backupNode.IP == n.IP || backupNode.IP == successor.IP {
+			// skip the already-tried primary node
+			if backupNode.IP == successor.IP {
 				continue
 			}
 
